@@ -25,7 +25,7 @@ from .jobs import JobContext, jobs
 from .media import load_meta, original_path
 from .models import Clip, Project
 from .projects import load_project
-from .grade import grade_chain, needs_grade, ref_scale
+from .grade import TO_GBRP, grade_chain, needs_grade, ref_scale
 from .transitions import ALL_TYPES, WHIP_TYPES, TransitionPlan, plan_transition
 
 router = APIRouter(prefix="/api", tags=["export"])
@@ -309,8 +309,8 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
             # Planar RGB: every plane is full size, so xfade's formulas apply as written (on yuv420p its
             # zoomin indexes the half-size chroma planes with luma coordinates). Matches the preview shader.
             ra, rb = g.label("ra"), g.label("rb")
-            g.add(f"[{va}]format=gbrp[{ra}]")
-            g.add(f"[{vb}]format=gbrp[{rb}]")
+            g.add(f"[{va}]{TO_GBRP}[{ra}]")
+            g.add(f"[{vb}]{TO_GBRP}[{rb}]")
             g.add(f"[{ra}][{rb}]xfade=transition={p.type}:duration={_f(D)}:offset=0,format=yuv420p[{vx}]")
         v, a = g.label("tv"), g.label("ta")
         g.add(f"[{vx}]trim=start_frame={lo - fa}:end_frame={hi - fa},setpts=PTS-STARTPTS[{v}]")

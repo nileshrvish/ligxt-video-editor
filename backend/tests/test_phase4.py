@@ -181,3 +181,22 @@ def test_lut_import_and_user_presets(client, tmp_path):
     client.post("/api/presets", json={"name": "reel GRADE", "filters": [{"type": "preset", "name": "vivid"}]})
     assert sum(p["name"].lower() == "reel grade" for p in client.get("/api/presets").json()["presets"]) == 1
     assert client.get("/api/fx/grain.png?w=540&h=960&s=2").status_code == 200
+
+
+def test_no_edge_corruption_at_1080_wide(client, tmp_path):
+    """Regression: FFmpeg 8.1's yuv420p->gbrp conversion garbled the last 8 columns at 1080 px wide,
+    which hit graded clips and xfade transitions in 1080x1920 exports."""
+    imgs = []
+    for i, c in enumerate(["0x7090B0", "0xC08050"]):
+        f = tmp_path / f"flat{i}.png"
+        ff("-f", "lavfi", "-i", f"color=c={c}:s=1080x1920", "-frames:v", "1", str(f))
+        imgs.append(upload(client, f))
+    clips = [{"id": "e1", "mediaId": imgs[0]["id"], "start": 0, "inPoint": 0, "outPoint": 1,
+              "filters": [{"type": "adjust", "params": {"contrast": 20}}]},
+             {"id": "e2", "mediaId": imgs[1]["id"], "start": 1, "inPoint": 0, "outPoint": 1}]
+    p = proj(client, clips)
+    p["transitions"] = [{"trackId": p["tracks"][0]["id"], "fromClipId": "e1", "toClipId": "e2", "type": "fade", "duration": 0.6}]
+    res = _export(client, p, mode="final")
+    for t in (0.4, 1.0):  # graded clip, then the middle of the fade
+        f = frame(res["path"], t, 1080, 1920)
+        assert np.abs(f[:, -8:] - f[:, -20:-12].mean(axis=1, keepdims=True)).max() < 6, f"edge columns differ at {t}s"

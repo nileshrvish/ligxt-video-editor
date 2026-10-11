@@ -353,6 +353,11 @@ def _write_png(path: Path, rgb: np.ndarray) -> None:
 
 
 # ---------------------------------------------------------------- ffmpeg chain
+# FFmpeg 8.1 corrupts the last 8 columns when converting yuv420p -> gbrp at widths like 1080
+# (= 8 mod 16). Going through packed rgb24 first is exact. Use this to enter planar RGB from YUV.
+TO_GBRP = "format=rgb24,format=gbrp"
+
+
 def _f(x: float) -> str:
     return f"{x:.6f}".rstrip("0").rstrip(".") or "0"
 
@@ -390,7 +395,7 @@ def grade_chain(g, src: str, filters: list[dict], w: int, h: int, *, rs: float, 
     sharp = float(p.get("sharpen") or 0) / 100 * 1.5
     if sharp > 0:
         step(f"unsharp=lx=5:ly=5:la={_f(sharp)}:cx=5:cy=5:ca=0")
-    step("format=gbrp")
+    step(TO_GBRP)
     if has_color(filters):
         lut = build_lut(filters, cubes)
         name = "g_" + hashlib.md5(lut.tobytes()).hexdigest()[:16] + ".cube"
