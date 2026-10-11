@@ -3,7 +3,7 @@
 // preview matches the export. As in FFmpeg, `P` (progress) runs from 1 at the first frame of the
 // transition to 0 at the end, and mix(a, b, m) = a*m + b*(1-m).
 // The whip pans are our own transition (no FFmpeg equivalent) and mirror render.whip_chain exactly:
-// an eased slide, averaged over 8 sub-frames at 240 fps for motion blur.
+// an eased slide, averaged over 8 sub-frames at 960 fps for motion blur.
 
 const XFADE = [
   "fade", "dissolve", "fadeblack", "fadewhite", "slideleft", "slideright", "slideup", "slidedown",
@@ -105,8 +105,8 @@ void main() {
   gl_FragColor = vec4(o.rgb, 1.0);
 }`;
 
-export const WHIP_FPS = 240;
-export const WHIP_SAMPLES = 8;
+export const WHIP_FPS = 960; // must match render.WHIP_FPS
+export const WHIP_SAMPLES = 32; // must match render.WHIP_SAMPLES
 
 export const easeInOutCubic = (u: number) => {
   u = Math.min(1, Math.max(0, u));

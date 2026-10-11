@@ -112,8 +112,8 @@ def overlay_geometry(m: dict, c: Clip, W: int, H: int) -> dict:
     return {"sw": sw, "sh": sh, "crop": mode == "fill" and (cw < sw or ch < sh), "cw": cw, "ch": ch}
 
 
-WHIP_FPS = 240  # sub-frame rate for the whip pan's motion blur
-WHIP_SAMPLES = 8  # sub-frames averaged per output frame (a 1/30 s shutter at 240 fps)
+WHIP_FPS = 960  # sub-frame rate for the whip pan's motion blur
+WHIP_SAMPLES = 32  # sub-frames averaged per output frame (a 1/30 s shutter at 960 fps; 8 showed stepping)
 
 
 def whip_chain(g: Graph, va: str, vb: str, out: str, kind: str, D: float, W: int, H: int, fps: float) -> None:
