@@ -1,0 +1,11 @@
+.venv/
+node_modules/
+frontend/dist/
+media/*
+cache/*
+exports/*
+projects/*
+!*/.gitkeep
+__pycache__/
+*.pyc
+*.tsbuildinfo
