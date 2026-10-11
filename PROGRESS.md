@@ -8,8 +8,8 @@ Read this first at the start of every session.
 |-------|-------|-------|
 | 1 | Backend, project format, media import + proxies, single-clip export | **Done** (2026-10-11) |
 | 2a | Timeline editing: move/reorder, trim, split, ripple delete, duplicate, snapping, markers, add/remove tracks, overlap prevention, one undo per drag | **Done** (2026-10-11) |
-| 2b | Canvas preview player (J/K/L, scrubbing, safe areas), audible music/audio in preview, overlay compositing (preview + export), beat detection | Next |
-| 3 | Transitions (xfade + whip pan) | |
+| 2b | Canvas preview player (J/K/L, scrubbing, safe areas), audible music/audio in preview, overlay compositing (preview + export), beat detection | **Done** (2026-10-11) |
+| 3 | Transitions (xfade + whip pan) | Next |
 | 4 | Filters & color (ffmpeg + WebGL preview), LUTs | |
 | 5 | Clip editing (crop, keyframes, speed, reverse, freeze, aspect) + audio (fades, detach, ducking) | |
 | 6 | Text, auto-captions (faster-whisper), export presets polish | |
@@ -38,22 +38,38 @@ Read this first at the start of every session.
 - Selection is `{kind: "clip", clipId}` (the track is looked up), plus `{kind: "marker", id}`.
 - Timeline fits 5 tracks at 1366×768 (38 px rows, timeline 40% by default).
 
+## Phase 2b: what exists
+
+- `frontend/src/player/engine.ts` (`PreviewEngine`): one master clock (wall time × rate). Each clip near the playhead (1.5 s preroll) gets its own detached `<video>`/`<audio>` on the proxy, slaved to the clock (seeks when drift exceeds 0.25 s). Frames are drawn to a 2D canvas: background → main track → overlay tracks in track order. A frame is only drawn once every layer is ready (no flashes); the old frame stays while seeking.
+- Audio: every element routes through WebAudio (`gain` per clip → master → analyser). Volume above 100%, linear fades, and track/clip mute work. Audio is muted in reverse or above 2× shuttle. Stopping silences immediately (from the store subscription, not the next frame).
+- `window.__ligxtPreview.debugState()` / `.level()` expose element state and output RMS for browser tests.
+- `player/geometry.ts`: layer geometry shared in spirit with `render.overlay_geometry` (unit-tested with the same numbers as the backend pixel test).
+- J/K/L shuttle (store `rate`: ±1/2/4/8), scrub bar under the preview, safe-area guides for 9:16 (Reels header, caption area, button column; 90% box for other aspects), fullscreen.
+- Overlay tracks in export: `overlay` filter per clip with `setpts+offset` and `enable=between(...)`. Fit/fill, transform scale/x/y/rotation/flip/opacity; later tracks on top; hidden tracks skipped. Overlay video audio is mixed like an audio clip.
+- Overlay clip Properties: scale %, X/Y px, opacity % (full transform/keyframe UI in Phase 5).
+- Beat detection: `backend/app/beats.py` (numpy: spectral flux, tempo via autocorrelation with a 120 BPM prior, Ellis DP beat tracker, +70 ms window-lag correction). `POST /api/media/{id}/beats` runs as a job and stores `bpm` + `beats` in the media meta. Accuracy on click tracks at 90–150 BPM: tempo within 1 BPM, beats within 30 ms (test). The UI shows beat ticks on music/audio clips, beats are snap targets, and there are "markers every beat / 2nd / bar" buttons.
+- Tests: backend 15 (`test_phase2.py` adds overlay pixel tests, overlay audio, beats); frontend 30 (vitest). Browser-verified: preview and export put the overlay in the same place (same sample points), 1×/2×/reverse rates exact, audio levels respond to track mutes, no drift over 3 s, scrub redraws across cuts.
+
 ## Decisions
 
 - Project length = end of the main video track (music running longer is cut). `util.projectDuration` and `render.build_plan` agree on this.
 - Overlaps are prevented in the UI (ops). The renderer still tolerates them (the earlier clip wins) for hand-edited JSON.
 - Output is forced to TV range (`scale=out_range=tv`, `-color_range tv`) so JPEG inputs don't produce yuvj420p.
-- Preview is currently an HTML `<video>` over proxies (CSS object-fit for fit/fill, blurred thumbnail for blur). Phase 2 replaces it with a canvas/WebGL player.
+- Preview is a 2D canvas fed by proxy media elements. Phase 4 adds WebGL shaders for filters (render each layer through a shader before compositing).
+- Track stacking: main video is the bottom layer; overlay tracks are drawn in the order listed, so lower rows in the timeline are on top.
+- Main-track clip transform is not applied yet (preview and export both ignore it); overlays use it. Phase 5 adds it for the main track.
 
-## Next (Phase 2b)
+## Next (Phase 3: transitions)
 
-- Canvas preview player: J/K/L shuttle, scrubbing with frame updates, Reels safe-area guides, fullscreen.
-- Music and audio tracks audible in the preview (WebAudio or synced media elements).
-- Overlay track compositing in the preview and the export (`overlay` filter with `enable=`/timestamp offset; respects hidden tracks and track order).
-- Beat detection on the music track (backend: onset/tempo from the audio, so cuts and markers can snap to beats).
+- Transition blocks between adjacent clips on the main track (and overlays if practical); duration 0.2–2 s; "apply to all cuts".
+- Export: `xfade` (fade, dissolve, fadeblack/fadewhite, slide/wipe ×4, zoomin, circleopen/close, pixelize, radial) plus a custom whip pan (directional blur + slide). Transitions overlap the clips, so the timeline gets shorter by each duration (or the clips' handles are used); decide and document.
+- Preview: draw both clips during the transition with a canvas/WebGL approximation.
+- `ops.pruneTransitions` already drops transitions whose clips stop being neighbours.
 
 ## Known issues / notes
 
 - Gotcha in PowerShell 5.1: `nativeExe | Select-Object -First 1` sets a non-zero `$LASTEXITCODE`. Capture the output to a variable first.
 - Speed: the export uses pitch-preserving `atempo`. The preview uses the browser's playbackRate. The speed UI arrives in Phase 5.
+- Chrome throttles requestAnimationFrame when the window isn't focused. The preview clock uses wall time, so it catches up, but browser-automation timing readings can look jumpy.
+- Beat detection was tested on synthetic click tracks only; check it on real songs during Phase 7 (templates use cut timing).
 - The media library is per project (`project.media`); files stay in `media\` even when removed from a project (no purge UI yet).

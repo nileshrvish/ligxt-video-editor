@@ -95,6 +95,21 @@ def fit_chain(g: Graph, src: str, mode: str, W: int, H: int, bg: str) -> str:
     return out
 
 
+def overlay_geometry(m: dict, c: Clip, W: int, H: int) -> dict:
+    """Size of an overlay layer on a WxH canvas (shared contract with the preview player):
+    the source is fitted (fit = contain, fill = cover then cropped to the canvas) and then scaled by
+    transform.scale about its centre; transform.x/y offset it from the canvas centre."""
+    sw0 = max(1, int(m.get("width") or W))
+    sh0 = max(1, int(m.get("height") or H))
+    mode = c.fit if c.fit in ("fit", "fill") else "fit"
+    f = (max if mode == "fill" else min)(W / sw0, H / sh0)
+    k = max(0.01, c.transform.scale)
+    even = lambda v: max(2, int(round(v / 2)) * 2)  # noqa: E731
+    sw, sh = even(sw0 * f * k), even(sh0 * f * k)
+    cw, ch = min(sw, even(W * k)), min(sh, even(H * k))
+    return {"sw": sw, "sh": sh, "crop": mode == "fill" and (cw < sw or ch < sh), "cw": cw, "ch": ch}
+
+
 @dataclass
 class Plan:
     args: list[str]
@@ -204,8 +219,63 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     joined = "".join(f"[{v}][{a}]" for v, a in zip(segs_v, segs_a))
     g.add(f"{joined}concat=n={n}:v=1:a=1[vcat][acat]")
 
-    # Audio + music tracks, positioned with adelay and mixed over the main audio.
+    # Overlay tracks: composited over the main track in track order (later tracks on top).
+    v_base = "vcat"
     extra: list[str] = []
+    for t in project.tracks:
+        if t.type != "overlay" or t.hidden:
+            continue
+        for c in sorted(t.clips, key=lambda c: c.start):
+            if not c.mediaId or clip_duration(c) <= EPS:
+                continue
+            m = metas[c.mediaId]
+            if m["type"] == "audio":
+                continue
+            c_start, c_end = c.start, c.start + clip_duration(c)
+            a_t, b_t = max(c_start, r0), min(c_end, r1)
+            if b_t - a_t <= EPS:
+                continue
+            seg = b_t - a_t
+            speed = c.speed or 1
+            src_in = c.inPoint + (a_t - c_start) * speed
+            path = str(original_path(m))
+            if m["type"] == "image":
+                idx = g.add_input(["-loop", "1", "-framerate", _f(fps), "-t", _f(seg + 0.1), "-i", path])
+            else:
+                idx = g.add_input(["-ss", _f(src_in), "-t", _f(seg * speed + 0.05), "-i", path])
+            geo = overlay_geometry(m, c, W, H)
+            offset = a_t - r0
+            ov = g.label("ov")
+            pre = f"setpts=(PTS-STARTPTS)/{_f(speed)}," if abs(speed - 1) > EPS else "setpts=PTS-STARTPTS,"
+            hdr = TONEMAP + "," if m.get("hdr") else ""
+            chain = [f"[{idx}:v]{hdr}{pre}fps={_f(fps)}", f"scale={geo['sw']}:{geo['sh']}"]
+            if geo["crop"]:
+                chain.append(f"crop={geo['cw']}:{geo['ch']}")
+            chain.append("format=rgba")
+            if c.transform.flipH:
+                chain.append("hflip")
+            if c.transform.flipV:
+                chain.append("vflip")
+            if abs(c.transform.rotation) > EPS:
+                a = f"{_f(c.transform.rotation)}*PI/180"
+                chain.append(f"rotate={a}:ow=rotw({a}):oh=roth({a}):c=none")
+            if c.transform.opacity < 1 - EPS:
+                chain.append(f"colorchannelmixer=aa={_f(max(0.0, c.transform.opacity))}")
+            chain.append(f"trim=duration={_f(seg)},setpts=PTS-STARTPTS+{_f(offset)}/TB[{ov}]")
+            g.add(",".join(chain))
+            out = g.label("vb")
+            g.add(f"[{v_base}][{ov}]overlay=x=(W-w)/2+({_f(c.transform.x)}):y=(H-h)/2+({_f(c.transform.y)}):"
+                  f"enable='between(t,{_f(offset)},{_f(offset + seg)})':eof_action=pass:format=auto[{out}]")
+            v_base = out
+            # Overlay video audio is mixed in like an audio-track clip.
+            if m["type"] == "video" and m.get("hasAudio") and not t.muted and not c.muted and c.volume > 0:
+                lbl = g.label("oa")
+                g.add(f"[{idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo{atempo(speed)},"
+                      f"atrim=duration={_f(seg)},asetpts=PTS-STARTPTS,volume={_f(c.volume * t.volume)},"
+                      f"adelay={int(round(offset * 1000))}:all=1[{lbl}]")
+                extra.append(lbl)
+
+    # Audio + music tracks, positioned with adelay and mixed over the main audio.
     for t in project.tracks:
         if t.type not in ("audio", "music") or t.muted:
             continue
@@ -242,7 +312,7 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         a_final = "amix"
     else:
         a_final = "acat"
-    g.add(f"[vcat]null[vout]")
+    g.add(f"[{v_base}]format=yuv420p[vout]")
     g.add(f"[{a_final}]atrim=duration={_f(dur)},asetpts=PTS-STARTPTS[aout]")
 
     if mode == "draft" and has_nvenc():

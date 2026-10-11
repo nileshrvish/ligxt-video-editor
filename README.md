@@ -61,13 +61,15 @@ Press **?** in the editor to see this list.
 | Ctrl + E | Export |
 | + / − or Ctrl + scroll | Zoom the timeline |
 | Esc | Clear selection |
-| J / K / L | Shuttle (Phase 2b) |
+| J / K / L | Shuttle back / stop / forward (press J or L again for 2×, 4×, 8×) |
+
+Preview: the scrub bar under the picture scrubs, **Safe areas** shows where Instagram's Reels UI covers the video, and the fullscreen button sits next to it. Music: select a music clip and click **Detect beats**. Beats become snap points, and you can drop markers on every beat or bar.
 
 Timeline mouse: drag a clip to move it (or to another track of the same kind), drag its edges to trim, drag a marker flag to move it, double-click a track name to rename it. The main video track is magnetic by default (no gaps; dragging reorders). Turn that off with the **Magnetic** button.
 
 ## Export settings
 
-- **Final**: libx264, CRF 18, preset slow, yuv420p, AAC 192 kHz stereo at 48 kHz, `+faststart`
+- **Final**: libx264, CRF 18, preset slow, yuv420p, AAC 192 kbps stereo at 48 kHz, `+faststart`
 - **Draft**: h264_nvenc (GPU), fast. Falls back to fast CPU encoding if NVENC is unavailable.
 - Presets: Instagram Reels / Shorts / TikTok (1080×1920), Square (1080×1080), Portrait 4:5 (1080×1350), YouTube (1920×1080), Custom.
 - Every export runs an audio/video sync check and reports the result.

@@ -129,6 +129,8 @@ export default function Editor({ projectId }: { projectId: string }) {
         s.deleteSelectedClip(e.shiftKey);
       } else if (k.toLowerCase() === "s") {
         s.splitAtPlayhead();
+      } else if (k === "j" || k === "k" || k === "l" || k === "J" || k === "K" || k === "L") {
+        s.shuttle(k.toLowerCase() as "j" | "k" | "l");
       } else if (k.toLowerCase() === "m") {
         s.addMarkerAtPlayhead();
       } else if (k.toLowerCase() === "n") {
@@ -299,7 +301,7 @@ const SHORTCUTS: [string, string, boolean?][] = [
   ["Ctrl + scroll", "Zoom timeline"],
   ["Esc", "Clear selection"],
   ["?", "This help"],
-  ["J / K / L", "Shuttle", true],
+  ["J / K / L", "Shuttle back / stop / forward (press again: 2×, 4×, 8×)"],
 ];
 
 export function ShortcutsOverlay({ onClose }: { onClose: () => void }) {

@@ -52,6 +52,7 @@ export const api = {
     req<{ media: MediaMeta[]; missing: string[] }>("GET", `/api/media?ids=${ids.join(",")}`),
   getMediaOne: (id: string) => req<MediaMeta>("GET", `/api/media/${id}`),
   reprocessMedia: (id: string) => req<{ jobId: string }>("POST", `/api/media/${id}/reprocess`),
+  detectBeats: (id: string) => req<{ jobId: string }>("POST", `/api/media/${id}/beats`),
 
   exportProject: (p: Project, mode: string, rangeStart?: number, rangeEnd?: number) =>
     req<{ jobId: string }>("POST", `/api/projects/${p.id}/export`, { project: p, mode, rangeStart, rangeEnd }),

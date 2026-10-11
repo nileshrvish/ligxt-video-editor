@@ -114,6 +114,30 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
         {m?.type === "image" && <div className="faint" style={{ fontSize: 11 }}>Photos: the out point sets how long the photo shows.</div>}
       </div>
 
+      {trackType === "overlay" && (
+        <div className="prop-group">
+          <div className="label">Overlay position</div>
+          <div className="prop-row">
+            <label>Scale</label>
+            <NumberField value={clip.transform.scale * 100} min={1} max={400} step={5} suffix="%" onCommit={(v) => update((c) => void (c.transform.scale = v / 100))} />
+          </div>
+          <div className="prop-row">
+            <label>X / Y</label>
+            <div className="row" style={{ gap: 4 }}>
+              <NumberField value={clip.transform.x} step={10} suffix="px" onCommit={(v) => update((c) => void (c.transform.x = v))} />
+              <NumberField value={clip.transform.y} step={10} suffix="px" onCommit={(v) => update((c) => void (c.transform.y = v))} />
+            </div>
+          </div>
+          <div className="prop-row">
+            <label>Opacity</label>
+            <NumberField value={Math.round(clip.transform.opacity * 100)} min={0} max={100} step={5} suffix="%" onCommit={(v) => update((c) => void (c.transform.opacity = v / 100))} />
+          </div>
+          <div className="faint" style={{ fontSize: 11 }}>Picture-in-picture: try 40% scale and X/Y offsets. Full transform and keyframe editing arrive in Phase 5.</div>
+        </div>
+      )}
+
+      {(trackType === "audio" || trackType === "music") && m && <BeatsSection clip={clip} m={m} />}
+
       {isVisual && (
         <div className="prop-group">
           <div className="label">Frame</div>
@@ -179,6 +203,46 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
         </button>
         <div className="faint" style={{ fontSize: 11 }}>Crop, keyframes, speed, filters and transitions arrive in later phases.</div>
       </div>
+    </div>
+  );
+}
+
+function BeatsSection({ clip, m }: { clip: Clip; m: MediaMeta }) {
+  const job = useApp((s) =>
+    Object.values(s.jobs).find((j) => j.kind === "beats" && j.ref.mediaId === m.id && (j.status === "running" || j.status === "queued")),
+  );
+  const detect = () =>
+    api.detectBeats(m.id).catch((e) => toastError("Beat detection could not start", e));
+  const beats = ops.clipBeats(clip, m.beats);
+  const addMarkers = (every: number) => {
+    const picks = beats.filter((_, i) => i % every === 0);
+    let added = 0;
+    useEditor.getState().commit((p) => {
+      for (const b of picks) if (ops.addMarker(p, b, every === 4 ? "Bar" : "")) added++;
+    });
+    useApp.getState().toast({ kind: "success", title: `Added ${added} marker${added === 1 ? "" : "s"}` });
+  };
+  return (
+    <div className="prop-group">
+      <div className="label">Beats</div>
+      {m.beats ? (
+        <>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {m.bpm} BPM · {beats.length} beats in this clip. Clip edges, markers and the playhead snap to beats.
+          </div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+            <span className="faint" style={{ fontSize: 12 }}>Markers on:</span>
+            <button className="btn sm" onClick={() => addMarkers(1)}>Every beat</button>
+            <button className="btn sm" onClick={() => addMarkers(2)}>Every 2nd</button>
+            <button className="btn sm" onClick={() => addMarkers(4)}>Every bar (4)</button>
+          </div>
+          <button className="btn sm ghost" onClick={detect} disabled={!!job}>Detect again</button>
+        </>
+      ) : (
+        <button className="btn" onClick={detect} disabled={!!job}>
+          {job ? <><Icon name="loader" size={14} className="spin" /> Detecting beats…</> : <><Icon name="music" size={14} /> Detect beats</>}
+        </button>
+      )}
     </div>
   );
 }

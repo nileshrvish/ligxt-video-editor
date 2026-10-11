@@ -315,9 +315,16 @@ export function removeMarker(p: Project, id: string): void {
 }
 
 // ---------------------------------------------------------------- snapping
-/** Snap candidates: every clip edge (except `excludeId`), playhead, markers and 0. */
-export function snapPoints(p: Project, playhead: number, excludeId?: string): number[] {
-  const pts = new Set<number>([0, round(playhead)]);
+/** Beat times of a clip's media mapped onto the timeline (only beats inside the clip). */
+export function clipBeats(c: Clip, beats: number[] | undefined): number[] {
+  if (!beats?.length) return [];
+  const speed = c.speed || 1;
+  return beats.filter((b) => b >= c.inPoint && b < c.outPoint).map((b) => round(c.start + (b - c.inPoint) / speed));
+}
+
+/** Snap candidates: every clip edge (except `excludeId`), playhead, markers, 0 and `extra` (e.g. beats). */
+export function snapPoints(p: Project, playhead: number, excludeId?: string, extra: number[] = []): number[] {
+  const pts = new Set<number>([0, round(playhead), ...extra]);
   for (const t of p.tracks)
     for (const c of t.clips) {
       if (c.id === excludeId) continue;

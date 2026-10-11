@@ -27,6 +27,8 @@ interface EditorState {
   selection: Selection;
   playhead: number;
   playing: boolean;
+  /** Playback rate while playing: 1 = normal; J/L shuttle uses ±1, ±2, ±4, ±8. */
+  rate: number;
   pxPerSec: number;
   uploads: Upload[];
   saveState: SaveState;
@@ -48,6 +50,8 @@ interface EditorState {
   select: (s: Selection) => void;
   setPlayhead: (t: number) => void;
   setPlaying: (p: boolean) => void;
+  /** J / K / L shuttle. */
+  shuttle: (key: "j" | "k" | "l") => void;
   setZoom: (pxPerSec: number) => void;
   importFiles: (files: File[]) => Promise<void>;
   refreshMedia: (id: string) => Promise<void>;
@@ -74,6 +78,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   selection: { kind: "none" },
   playhead: 0,
   playing: false,
+  rate: 1,
   pxPerSec: 60,
   uploads: [],
   saveState: "saved",
@@ -147,7 +152,15 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   select: (selection) => set({ selection }),
   setPlayhead: (t) => set({ playhead: Math.max(0, t) }),
-  setPlaying: (playing) => set({ playing }),
+  setPlaying: (playing) => set(playing ? { playing } : { playing, rate: 1 }),
+
+  shuttle: (key) => {
+    const { playing, rate } = get();
+    if (key === "k") return set({ playing: false, rate: 1 });
+    const dir = key === "l" ? 1 : -1;
+    const next = playing && Math.sign(rate) === dir ? Math.min(8, Math.abs(rate) * 2) * dir : dir;
+    set({ playing: true, rate: next });
+  },
   setZoom: (pxPerSec) => set({ pxPerSec: Math.min(400, Math.max(8, pxPerSec)) }),
 
   importFiles: async (files) => {

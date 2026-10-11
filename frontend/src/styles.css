@@ -264,3 +264,12 @@ pre.log { background: var(--bg-0); border: 1px solid var(--line); border-radius:
 .marker-flag { position: absolute; top: 0; width: 10px; height: 14px; margin-left: -5px; background: var(--mc); clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); cursor: grab; z-index: 2; }
 .marker-flag.sel { outline: none; filter: drop-shadow(0 0 3px #fff); }
 .marker-flag span { position: absolute; left: 12px; top: 0; font-size: 10px; white-space: nowrap; color: var(--mc); pointer-events: none; }
+
+/* ---------- canvas preview ---------- */
+.scrubber { width: 100%; height: 14px; margin: 0; display: block; background: var(--bg-1); padding: 0 10px; }
+.shuttle-badge { position: absolute; top: 8px; right: 8px; font: 600 12px var(--mono); background: rgba(0, 0, 0, 0.7); padding: 2px 8px; border-radius: 10px; }
+.safe-layer { position: absolute; inset: 0; pointer-events: none; }
+.safe-zone { position: absolute; background: rgba(255, 92, 138, 0.22); display: grid; place-items: center; }
+.safe-zone span { font-size: 10px; color: rgba(255, 255, 255, 0.85); text-shadow: 0 1px 2px #000; text-transform: uppercase; letter-spacing: 0.06em; }
+.safe-box { position: absolute; border: 1px dashed rgba(255, 255, 255, 0.7); }
+.tl-clip .beat { position: absolute; top: 0; width: 1px; height: 30%; background: rgba(255, 255, 255, 0.85); pointer-events: none; }

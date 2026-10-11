@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { clipAtTime, useEditor } from "../store/editor";
-import type { Clip, FitMode, MediaMeta } from "../types";
-import { clipEnd, fmtTime, projectDuration } from "../util";
+import { PreviewEngine } from "../player/engine";
+import { REELS_SAFE } from "../player/geometry";
+import { useEditor } from "../store/editor";
+import type { MediaMeta } from "../types";
+import { fmtTime, projectDuration } from "../util";
 import { Icon } from "./Icons";
 
 /** URL the browser should play for a media item: proxy when ready, else the original. */
@@ -73,91 +75,52 @@ function SourceMonitor({ m }: { m: MediaMeta }) {
 
 function ProgramMonitor() {
   const project = useEditor((s) => s.project!);
-  const media = useEditor((s) => s.media);
   const playhead = useEditor((s) => s.playhead);
   const playing = useEditor((s) => s.playing);
+  const rate = useEditor((s) => s.rate);
   const stageRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const engineRef = useRef<PreviewEngine | null>(null);
   const size = useBoxSize(stageRef);
-  const { width: W, height: H, fps } = project.settings;
+  const [buffering, setBuffering] = useState(false);
+  const [safe, setSafe] = useState(() => readFlag("ligxt.safeAreas", false));
+  const { width: W, height: H, fps, aspect } = project.settings;
   const duration = projectDuration(project);
-
-  const hit = clipAtTime(project, playhead);
-  const clip = hit?.clip ?? null;
-  const m = clip?.mediaId ? media[clip.mediaId] : undefined;
-  const mainTrack = project.tracks.find((t) => t.type === "video");
-  const fit: FitMode = clip?.fit ?? project.settings.background.mode;
+  const empty = project.tracks.every((t) => t.clips.length === 0);
 
   // Frame size that fits the stage at the project's aspect ratio.
   const pad = 24;
-  const scale = Math.min((size.w - pad) / W, (size.h - pad) / H);
-  const fw = Math.max(0, Math.floor(W * scale));
-  const fh = Math.max(0, Math.floor(H * scale));
+  const scale = Math.max(0, Math.min((size.w - pad) / W, (size.h - pad) / H));
+  const fw = Math.floor(W * scale);
+  const fh = Math.floor(H * scale);
 
-  const srcTime = (c: Clip, t: number) => c.inPoint + (t - c.start) * (c.speed || 1);
-
-  // Load / seek the video element when the clip under the playhead changes or when scrubbing.
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v || !clip || !m || m.type !== "video") return;
-    const url = playableUrl(m);
-    if (v.dataset.src !== url) {
-      v.dataset.src = url;
-      v.src = url;
-    }
-    const target = srcTime(clip, useEditor.getState().playhead);
-    if (!useEditor.getState().playing || Math.abs(v.currentTime - target) > 0.25) v.currentTime = target;
-    v.playbackRate = clip.speed || 1;
-    v.volume = Math.max(0, Math.min(1, clip.volume * (mainTrack?.volume ?? 1)));
-    v.muted = clip.muted || !!mainTrack?.muted;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clip?.id, m?.proxy, clip?.inPoint, clip?.speed, clip?.volume, clip?.muted, playing ? 0 : playhead]);
-
-  // Play/pause the element alongside the transport.
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (playing && m?.type === "video") v.play().catch(() => void 0);
-    else v.pause();
-  }, [playing, clip?.id, m?.type]);
-
-  // Playback clock: follow the video element when one is playing, else advance by wall time.
-  useEffect(() => {
-    if (!playing) return;
-    const s0 = useEditor.getState();
-    if (s0.project && s0.playhead >= projectDuration(s0.project) - 1e-3) s0.setPlayhead(0);
-    let raf = 0;
-    let last = performance.now();
-    const tick = (now: number) => {
-      const dt = (now - last) / 1000;
-      last = now;
-      const s = useEditor.getState();
-      if (!s.project) return;
-      const total = projectDuration(s.project);
-      const h = clipAtTime(s.project, s.playhead);
-      const mm = h?.clip.mediaId ? s.media[h.clip.mediaId] : undefined;
-      const v = videoRef.current;
-      let t = s.playhead;
-      if (h && mm?.type === "video" && v) {
-        if (v.readyState >= 2 && !v.seeking) {
-          t = h.clip.start + (v.currentTime - h.clip.inPoint) / (h.clip.speed || 1);
-          if (t < s.playhead - 0.3 || v.ended) t = s.playhead + dt; // element not caught up yet
-          if (t >= clipEnd(h.clip) - 0.5 / fps || v.currentTime >= h.clip.outPoint - 0.01) t = clipEnd(h.clip);
-        }
-      } else {
-        t = s.playhead + dt;
-      }
-      if (t >= total) {
-        s.setPlayhead(total);
-        s.setPlaying(false);
-        return;
-      }
-      s.setPlayhead(t);
-      raf = requestAnimationFrame(tick);
+    if (!canvasRef.current) return;
+    const engine = new PreviewEngine(canvasRef.current);
+    engine.onBuffering = (b) => setBuffering(b);
+    engineRef.current = engine;
+    (window as unknown as { __ligxtPreview?: PreviewEngine }).__ligxtPreview = engine;
+    return () => {
+      engine.destroy();
+      engineRef.current = null;
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [playing, fps]);
+  }, [empty]);
+
+  // Backing store: display size x devicePixelRatio, never above the project resolution.
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv || !fw || !fh) return;
+    const dpr = window.devicePixelRatio || 1;
+    const k = Math.min(1, (fw * dpr) / W);
+    cv.width = Math.max(2, Math.round(W * k));
+    cv.height = Math.max(2, Math.round(H * k));
+    engineRef.current?.invalidate();
+  }, [fw, fh, W, H, empty]);
+
+  const toggleSafe = () => {
+    setSafe(!safe);
+    writeFlag("ligxt.safeAreas", !safe);
+  };
 
   const toggleFullscreen = () => {
     const el = stageRef.current;
@@ -166,8 +129,12 @@ function ProgramMonitor() {
     else el.requestFullscreen().catch(() => void 0);
   };
 
-  const objectFit = fit === "fill" ? "cover" : "contain";
-  const empty = !mainTrack || mainTrack.clips.length === 0;
+  const shuttleLabel = playing && rate !== 1 ? `${rate < 0 ? "◀◀ " : "▶▶ "}${Math.abs(rate)}×` : null;
+  const step = (dir: number) => {
+    const s = useEditor.getState();
+    s.setPlaying(false);
+    s.setPlayhead(Math.round((s.playhead + dir / fps) * fps) / fps);
+  };
 
   return (
     <div className="preview">
@@ -178,53 +145,90 @@ function ProgramMonitor() {
             <div>Import media and double-click it (or drag it) onto the timeline.</div>
           </div>
         ) : (
-          <div className="canvas-frame" style={{ width: fw, height: fh, background: project.settings.background.color }}>
-            {m && fit === "blur" && m.thumbnail && <img className="blur-bg" src={m.proxy && m.type === "image" ? m.proxy : m.thumbnail} alt="" />}
-            <video
-              ref={videoRef}
-              playsInline
-              preload="auto"
-              style={{ objectFit, visibility: m?.type === "video" ? "visible" : "hidden" }}
-            />
-            {m?.type === "image" && <img src={m.proxy ?? m.thumbnail ?? ""} alt={m.name} style={{ objectFit }} />}
+          <div className="canvas-frame" style={{ width: fw, height: fh }}>
+            <canvas ref={canvasRef} style={{ width: fw, height: fh, display: "block" }} />
+            {safe && <SafeAreas reels={aspect === "9:16"} />}
+            {buffering && <span className="preview-label" style={{ top: 8, left: 8 }}>Loading…</span>}
+            {shuttleLabel && <span className="shuttle-badge">{shuttleLabel}</span>}
           </div>
         )}
       </div>
+      <input
+        className="scrubber"
+        type="range"
+        min={0}
+        max={Math.max(0.001, duration)}
+        step={1 / fps}
+        value={Math.min(playhead, duration)}
+        disabled={empty}
+        onPointerDown={() => useEditor.getState().setPlaying(false)}
+        onChange={(e) => useEditor.getState().setPlayhead(+e.target.value)}
+        title="Scrub"
+      />
       <div className="transport">
-        <button
-          className="btn ghost icon"
-          title="Previous frame (←)"
-          onClick={() => {
-            const s = useEditor.getState();
-            s.setPlaying(false);
-            s.setPlayhead(s.playhead - 1 / fps);
-          }}
-        >
+        <button className="btn ghost icon" title="Previous frame (←)" onClick={() => step(-1)}>
           <Icon name="stepBack" />
         </button>
-        <button className="btn icon primary" title="Play / pause (Space)" onClick={() => useEditor.getState().setPlaying(!playing)} disabled={empty}>
+        <button className="btn icon primary" title="Play / pause (Space). J / K / L to shuttle" onClick={() => useEditor.getState().setPlaying(!playing)} disabled={empty}>
           <Icon name={playing ? "pause" : "play"} />
         </button>
-        <button
-          className="btn ghost icon"
-          title="Next frame (→)"
-          onClick={() => {
-            const s = useEditor.getState();
-            s.setPlaying(false);
-            s.setPlayhead(s.playhead + 1 / fps);
-          }}
-        >
+        <button className="btn ghost icon" title="Next frame (→)" onClick={() => step(1)}>
           <Icon name="stepFwd" />
         </button>
         <span className="timecode">
           {fmtTime(playhead, fps)} <span className="faint">/ {fmtTime(duration, fps)}</span>
         </span>
         <span className="spacer" />
-        <span className="faint" style={{ fontSize: 11 }}>{W}×{H} · {fps} fps</span>
+        <button className={`btn ghost sm toggle ${safe ? "on" : ""}`} onClick={toggleSafe} title="Show the areas Instagram's buttons and captions cover">
+          Safe areas
+        </button>
+        <span className="faint" style={{ fontSize: 11 }}>{W}×{H}</span>
         <button className="btn ghost icon" title="Fullscreen" onClick={toggleFullscreen}>
           <Icon name="fullscreen" />
         </button>
       </div>
     </div>
   );
+}
+
+function SafeAreas({ reels }: { reels: boolean }) {
+  if (!reels) {
+    return (
+      <div className="safe-layer">
+        <div className="safe-box" style={{ inset: "5%" }} />
+      </div>
+    );
+  }
+  const S = REELS_SAFE;
+  return (
+    <div className="safe-layer">
+      <div className="safe-zone" style={{ top: 0, left: 0, right: 0, height: `${S.top * 100}%` }}>
+        <span>Reels header</span>
+      </div>
+      <div className="safe-zone" style={{ bottom: 0, left: 0, right: 0, height: `${S.bottom * 100}%` }}>
+        <span>Caption · username · audio</span>
+      </div>
+      <div className="safe-zone" style={{ top: `${S.rightFrom * 100}%`, bottom: `${S.bottom * 100}%`, right: 0, width: `${S.right * 100}%` }}>
+        <span style={{ writingMode: "vertical-rl" }}>Buttons</span>
+      </div>
+      <div className="safe-box" style={{ top: `${S.top * 100}%`, bottom: `${S.bottom * 100}%`, left: "4%", right: `${S.right * 100}%` }} />
+    </div>
+  );
+}
+
+function readFlag(key: string, dflt: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v == null ? dflt : v === "1";
+  } catch {
+    return dflt;
+  }
+}
+
+function writeFlag(key: string, v: boolean) {
+  try {
+    localStorage.setItem(key, v ? "1" : "0");
+  } catch {
+    /* storage unavailable */
+  }
 }

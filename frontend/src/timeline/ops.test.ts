@@ -228,6 +228,13 @@ describe("tracks, markers, snapping, transitions", () => {
     expect(ops.snap(7.95, pts, 0.2, [0, 2]).time).toBe(8);
   });
 
+  it("maps beats through in-point and speed, and adds them as snap points", () => {
+    const c = clip(10, 4, { inPoint: 2, outPoint: 10, speed: 2 });
+    expect(ops.clipBeats(c, [1, 2, 3, 9.5, 10])).toEqual([10, 10.5, 13.75]);
+    const p = project([track("music", [c])]);
+    expect(ops.snapPoints(p, 0, undefined, [10.5])).toContain(10.5);
+  });
+
   it("removes transitions when clips stop being neighbours", () => {
     const a = clip(0, 2), b = clip(2, 2), c = clip(4, 2);
     const p = project([track("video", [a, b, c])]);

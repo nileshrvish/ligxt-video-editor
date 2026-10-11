@@ -94,7 +94,7 @@ export default function Timeline() {
     const kind: DragKind = edges && x < EDGE_PX ? "trim-start" : edges && x > rect.width - EDGE_PX ? "trim-end" : "move";
     const x0 = e.clientX;
     const base = s.project!;
-    const points = ops.snapPoints(base, s.playhead, c.id);
+    const points = ops.snapPoints(base, s.playhead, c.id, beatPoints(base, s.media, c.id));
     const dur = clipDuration(c);
     let active = false;
 
@@ -143,7 +143,7 @@ export default function Timeline() {
     s.setPlaying(false);
     s.setPlayhead(time);
     const x0 = e.clientX;
-    const points = ops.snapPoints(s.project!, -1).filter((p) => p >= 0 && Math.abs(p - time) > 1e-6);
+    const points = ops.snapPoints(s.project!, -1, undefined, beatPoints(s.project!, s.media)).filter((p) => p >= 0 && Math.abs(p - time) > 1e-6);
     let active = false;
     follow(
       e,
@@ -313,6 +313,16 @@ export default function Timeline() {
   );
 }
 
+/** Beats of every clip on audio/music tracks, as timeline times (snap targets). */
+function beatPoints(p: { tracks: Track[] }, media: Record<string, MediaMeta>, excludeId?: string): number[] {
+  const out: number[] = [];
+  for (const t of p.tracks) {
+    if (t.type !== "audio" && t.type !== "music") continue;
+    for (const c of t.clips) if (c.id !== excludeId && c.mediaId) out.push(...ops.clipBeats(c, media[c.mediaId]?.beats));
+  }
+  return out;
+}
+
 function AddTrackMenu() {
   return (
     <select
@@ -465,6 +475,8 @@ const ClipBlock = memo(function ClipBlock({
     >
       {visual && m?.thumbnail && <div className="cthumb" style={{ backgroundImage: `url(${m.thumbnail})` }} />}
       {showWave && m && <Waveform m={m} c={c} width={w} muted={c.muted || track.muted} />}
+      {m?.beats && (track.type === "audio" || track.type === "music") && pps * (60 / (m.bpm || 120)) >= 4 &&
+        ops.clipBeats(c, m.beats).map((b) => <div key={b} className="beat" style={{ left: (b - c.start) * pps }} />)}
       <div className="clabel">{m?.name ?? "Missing media"}</div>
       {!track.locked && w > 3 * EDGE_PX && (
         <>

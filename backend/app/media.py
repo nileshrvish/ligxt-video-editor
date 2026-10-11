@@ -325,3 +325,24 @@ def delete_media(mid: str):
     shutil.rmtree(media_dir(mid), ignore_errors=True)
     shutil.rmtree(CACHE_DIR / mid, ignore_errors=True)
     return {"ok": True}
+
+
+@router.post("/{mid}/beats")
+def detect_beats(mid: str):
+    """Background job: detect tempo + beat times; stored in the media metadata (bpm, beats)."""
+    meta = load_meta(_valid_id(mid))
+    if not meta:
+        raise HTTPException(404, "Media not found.")
+    if not meta.get("hasAudio"):
+        raise HTTPException(400, f"'{meta['name']}' has no audio to detect beats in.")
+
+    def run(ctx: JobContext) -> dict:
+        from .beats import detect
+        ctx.progress(0.1, "Analysing beats")
+        res = detect(str(original_path(meta)))
+        update_meta(mid, bpm=res["bpm"], beats=res["beats"])
+        ctx.message(f"{len(res['beats'])} beats at {res['bpm']} BPM")
+        return {"mediaId": mid, "bpm": res["bpm"], "count": len(res["beats"])}
+
+    job = jobs.submit("beats", f"Beat detection: {meta['name']}", run, queue="media", ref={"mediaId": mid})
+    return {"jobId": job.id}

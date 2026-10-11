@@ -87,6 +87,8 @@ export interface MediaMeta {
   proxyStatus: "none" | "pending" | "ready" | "error" | "notNeeded";
   status: "processing" | "ready" | "warning" | "error";
   error: string | null;
+  bpm?: number;
+  beats?: number[]; // beat times in source seconds
 }
 
 export interface Job {
