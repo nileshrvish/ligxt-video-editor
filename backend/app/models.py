@@ -89,6 +89,7 @@ class Clip(Base):
     keyframes: dict[str, list[Keyframe]] = Field(default_factory=dict)
     filters: list[Filter] = Field(default_factory=list)
     text: Optional[TextStyle] = None
+    adjustment: bool = False  # adjustment layer (overlay track, no media): grades everything below it
 
     @property
     def duration(self) -> float:

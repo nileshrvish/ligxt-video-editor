@@ -232,6 +232,9 @@ export default function Timeline() {
             <Icon name="link" size={14} /> Magnetic
           </button>
         )}
+        <button className="btn ghost sm" onClick={() => st().addAdjustmentLayer()} title="Add an adjustment layer at the playhead: its filters grade everything below it">
+          <Icon name="sparkles" size={14} /> Adjustment
+        </button>
         <span className="tl-sep" />
         <AddTrackMenu />
         <span className="spacer" />
@@ -520,17 +523,18 @@ const ClipBlock = memo(function ClipBlock({
   const showWave = m?.waveform && (track.type === "audio" || track.type === "music" || (m.hasAudio && track.type === "video"));
   return (
     <div
-      className={`tl-clip ${selected ? "sel" : ""} ${track.locked ? "locked" : ""}`}
+      className={`tl-clip ${selected ? "sel" : ""} ${track.locked ? "locked" : ""} ${c.adjustment ? "adj" : ""}`}
       data-clip-id={c.id}
       style={{ left: c.start * pps, width: w, ["--c" as string]: TRACK_COLORS[track.type], opacity: track.hidden ? 0.4 : 1 }}
       onPointerDown={(e) => onPointerDown(e, c, track)}
       title={m ? `${m.name}\n${c.inPoint.toFixed(2)}s → ${c.outPoint.toFixed(2)}s\nDrag to move · drag edges to trim` : "Missing media"}
     >
       {visual && m?.thumbnail && <div className="cthumb" style={{ backgroundImage: `url(${m.thumbnail})` }} />}
+      {c.filters?.length > 0 && !c.adjustment && <span className="fx-dot" title={`${c.filters.length} filter(s)`}>fx</span>}
       {showWave && m && <Waveform m={m} c={c} width={w} muted={c.muted || track.muted} />}
       {m?.beats && (track.type === "audio" || track.type === "music") && pps * (60 / (m.bpm || 120)) >= 4 &&
         ops.clipBeats(c, m.beats).map((b) => <div key={b} className="beat" style={{ left: (b - c.start) * pps }} />)}
-      <div className="clabel">{m?.name ?? "Missing media"}</div>
+      <div className="clabel">{c.adjustment ? "Adjustment layer" : m?.name ?? "Missing media"}</div>
       {!track.locked && w > 3 * EDGE_PX && (
         <>
           <div className="edge left" />

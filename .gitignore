@@ -9,3 +9,5 @@ projects/*
 __pycache__/
 *.pyc
 *.tsbuildinfo
+user_luts/
+presets/

@@ -56,6 +56,20 @@ export const api = {
 
   exportProject: (p: Project, mode: string, rangeStart?: number, rangeEnd?: number) =>
     req<{ jobId: string }>("POST", `/api/projects/${p.id}/export`, { project: p, mode, rangeStart, rangeEnd }),
+  listLuts: () => req<{ luts: { id: string; name: string; kind: "builtin" | "user" }[] }>("GET", "/api/luts"),
+  importLut: async (file: File) => {
+    let res: Response;
+    try {
+      res = await fetch(`/api/luts/import?filename=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
+    } catch {
+      throw new ApiError("Cannot reach the Ligxt backend. Is start.ps1 still running?", 0);
+    }
+    if (!res.ok) throw await parseError(res);
+    return (await res.json()) as { id: string; name: string };
+  },
+  listPresets: () => req<{ presets: { id: string; name: string; filters: import("./types").Filter[] }[] }>("GET", "/api/presets"),
+  savePreset: (name: string, filters: import("./types").Filter[]) => req<{ id: string; name: string }>("POST", "/api/presets", { name, filters }),
+  deletePreset: (id: string) => req<{ ok: boolean }>("DELETE", `/api/presets/${id}`),
   cancelJob: (id: string) => req<{ ok: boolean }>("POST", `/api/jobs/${id}/cancel`),
   openFolder: (path?: string) => req<{ ok: boolean }>("POST", "/api/system/open-folder", { path: path ?? null }),
 };

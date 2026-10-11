@@ -36,6 +36,8 @@ export interface Clip {
   keyframes: Record<string, Keyframe[]>;
   filters: Filter[];
   text: Record<string, unknown> | null;
+  /** Adjustment layer (overlay track, no media): grades everything below it for its duration. */
+  adjustment?: boolean;
   [extra: string]: unknown;
 }
 

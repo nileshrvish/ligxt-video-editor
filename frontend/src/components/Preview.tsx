@@ -84,6 +84,12 @@ function ProgramMonitor() {
   const size = useBoxSize(stageRef);
   const [buffering, setBuffering] = useState(false);
   const [safe, setSafe] = useState(() => readFlag("ligxt.safeAreas", false));
+  const [scopes, setScopes] = useState(() => readFlag("ligxt.scopes", false));
+  const compare = useEditor((s) => s.compare);
+  const toggleScopes = () => {
+    setScopes(!scopes);
+    writeFlag("ligxt.scopes", !scopes);
+  };
   const { width: W, height: H, fps, aspect } = project.settings;
   const duration = projectDuration(project);
   const empty = project.tracks.every((t) => t.clips.length === 0);
@@ -150,9 +156,11 @@ function ProgramMonitor() {
             {safe && <SafeAreas reels={aspect === "9:16"} />}
             {buffering && <span className="preview-label" style={{ top: 8, left: 8 }}>Loading…</span>}
             {shuttleLabel && <span className="shuttle-badge">{shuttleLabel}</span>}
+            {compare != null && <CompareDivider value={compare} width={fw} />}
           </div>
         )}
       </div>
+      {scopes && !empty && <Scopes canvasRef={canvasRef} />}
       <input
         className="scrubber"
         type="range"
@@ -179,6 +187,13 @@ function ProgramMonitor() {
           {fmtTime(playhead, fps)} <span className="faint">/ {fmtTime(duration, fps)}</span>
         </span>
         <span className="spacer" />
+        <button className={`btn ghost sm toggle ${compare != null ? "on" : ""}`} title="Before / after: drag the divider to compare the graded and ungraded picture (\\)"
+          onClick={() => useEditor.getState().setCompare(compare == null ? 0.5 : null)}>
+          Before/After
+        </button>
+        <button className={`btn ghost sm toggle ${scopes ? "on" : ""}`} title="Colour scopes: histogram and waveform" onClick={toggleScopes}>
+          Scopes
+        </button>
         <button className={`btn ghost sm toggle ${safe ? "on" : ""}`} onClick={toggleSafe} title="Show the areas Instagram's buttons and captions cover">
           Safe areas
         </button>
@@ -186,6 +201,97 @@ function ProgramMonitor() {
         <button className="btn ghost icon" title="Fullscreen" onClick={toggleFullscreen}>
           <Icon name="fullscreen" />
         </button>
+      </div>
+    </div>
+  );
+}
+
+function CompareDivider({ value, width }: { value: number; width: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const drag = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const frame = ref.current?.parentElement;
+    if (!frame) return;
+    const move = (ev: PointerEvent) => {
+      const r = frame.getBoundingClientRect();
+      useEditor.getState().setCompare(Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    move(e.nativeEvent);
+  };
+  return (
+    <div ref={ref} className="cmp" onPointerDown={drag} style={{ left: value * width }}>
+      <span className="cmp-label l">Before</span>
+      <span className="cmp-label r">After</span>
+      <span className="cmp-handle">⇆</span>
+    </div>
+  );
+}
+
+/** Histogram (R, G, B, luma) and luma waveform of the graded preview, refreshed ~6 times a second. */
+function Scopes({ canvasRef }: { canvasRef: React.RefObject<HTMLCanvasElement> }) {
+  const hRef = useRef<HTMLCanvasElement>(null);
+  const wRef = useRef<HTMLCanvasElement>(null);
+  const [stats, setStats] = useState({ dark: 0, clip: 0 });
+  useEffect(() => {
+    const tmp = document.createElement("canvas");
+    const id = window.setInterval(() => {
+      const src = canvasRef.current, hc = hRef.current, wc = wRef.current;
+      if (!src || !hc || !wc || !src.width) return;
+      const w = 96, h = Math.max(2, Math.round((96 * src.height) / src.width));
+      tmp.width = w;
+      tmp.height = h;
+      const tx = tmp.getContext("2d", { willReadFrequently: true })!;
+      tx.drawImage(src, 0, 0, w, h);
+      const d = tx.getImageData(0, 0, w, h).data;
+      const bins = [new Float32Array(64), new Float32Array(64), new Float32Array(64), new Float32Array(64)];
+      const wave = new Float32Array(w * 64);
+      let dark = 0, clip = 0;
+      for (let i = 0, px = 0; i < d.length; i += 4, px++) {
+        const y = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+        bins[0][d[i] >> 2]++; bins[1][d[i + 1] >> 2]++; bins[2][d[i + 2] >> 2]++; bins[3][Math.min(63, y >> 2)]++;
+        wave[(px % w) * 64 + Math.min(63, y >> 2)]++;
+        if (y < 8) dark++;
+        if (d[i] > 250 || d[i + 1] > 250 || d[i + 2] > 250) clip++;
+      }
+      const n = w * h;
+      setStats({ dark: dark / n, clip: clip / n });
+      const hx = hc.getContext("2d")!;
+      hx.clearRect(0, 0, hc.width, hc.height);
+      hx.globalCompositeOperation = "lighter";
+      const max = Math.max(...bins.slice(0, 3).map((b) => Math.max(...b))) || 1;
+      ["rgba(255,70,70,0.55)", "rgba(70,255,90,0.55)", "rgba(80,120,255,0.6)"].forEach((col, c) => {
+        hx.fillStyle = col;
+        hx.beginPath();
+        hx.moveTo(0, hc.height);
+        for (let b = 0; b < 64; b++) hx.lineTo((b / 63) * hc.width, hc.height - (bins[c][b] / max) * (hc.height - 2));
+        hx.lineTo(hc.width, hc.height);
+        hx.fill();
+      });
+      hx.globalCompositeOperation = "source-over";
+      const wx = wc.getContext("2d")!;
+      const img = wx.createImageData(w, 64);
+      for (let x = 0; x < w; x++) for (let b = 0; b < 64; b++) {
+        const v = Math.min(255, wave[x * 64 + b] * 40);
+        const o = ((63 - b) * w + x) * 4;
+        img.data[o] = v * 0.6; img.data[o + 1] = v; img.data[o + 2] = v * 0.7; img.data[o + 3] = 255;
+      }
+      wx.putImageData(img, 0, 0);
+    }, 160);
+    return () => window.clearInterval(id);
+  }, [canvasRef]);
+  return (
+    <div className="scopes">
+      <div className="scope"><canvas ref={hRef} width={160} height={56} /><span>Histogram</span></div>
+      <div className="scope"><canvas ref={wRef} width={96} height={64} style={{ width: 120, height: 56, imageRendering: "pixelated" }} /><span>Waveform</span></div>
+      <div className="scope-stats">
+        <span className={stats.dark > 0.2 ? "warn" : ""}>Crushed blacks {Math.round(stats.dark * 100)}%</span>
+        <span className={stats.clip > 0.05 ? "warn" : ""}>Clipped highlights {Math.round(stats.clip * 100)}%</span>
       </div>
     </div>
   );

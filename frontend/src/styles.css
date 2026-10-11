@@ -287,3 +287,29 @@ pre.log { background: var(--bg-0); border: 1px solid var(--line); border-radius:
 .tl-addtr:hover { opacity: 1 !important; background: var(--accent-2); color: #fff; }
 .tr-grid { display: flex; flex-wrap: wrap; gap: 4px; }
 .tr-warning { font-size: 12px; color: #ffcf70; background: rgba(245, 185, 66, 0.1); border: 1px solid rgba(245, 185, 66, 0.35); border-radius: 6px; padding: 6px 8px; }
+
+/* ---------- filters & grading ---------- */
+.fl { gap: 6px; }
+.fl-head { display: flex; justify-content: space-between; align-items: center; width: 100%; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; cursor: pointer; font-size: 12px; color: var(--text); }
+.fl-head:hover { border-color: var(--line-strong); }
+.fl-badge { font-size: 10px; background: var(--accent-soft); color: var(--accent-2); border-radius: 8px; padding: 0 6px; margin-left: 6px; }
+.fl-body { display: flex; flex-direction: column; gap: 4px; padding: 2px 2px 6px; }
+.fl-row { display: grid; grid-template-columns: 78px 1fr 40px; gap: 6px; align-items: center; font-size: 12px; }
+.fl-row label { color: var(--text-2); cursor: default; }
+.fl-row input[type=range] { width: 100%; }
+.fl-row .mono { font-size: 11px; text-align: right; }
+.fl-check { font-size: 12px; color: var(--text-2); gap: 6px; cursor: pointer; }
+.fl-effect { border-top: 1px solid var(--line); padding-top: 4px; }
+.tl-clip.adj { --c: #6b5bb5 !important; background: repeating-linear-gradient(135deg, #6b5bb5 0 10px, #5d4fa0 10px 20px); }
+.fx-dot { position: absolute; right: 4px; top: 3px; font-size: 9px; font-weight: 700; background: rgba(0,0,0,0.6); color: #ffd27a; border-radius: 3px; padding: 0 3px; z-index: 1; }
+.cmp { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,0.8); cursor: ew-resize; z-index: 4; touch-action: none; }
+.cmp::before { content: ""; position: absolute; top: 0; bottom: 0; left: -8px; right: -8px; }
+.cmp-handle { position: absolute; top: 50%; left: -11px; width: 24px; height: 24px; margin-top: -12px; border-radius: 12px; background: #fff; color: #222; font-size: 13px; display: grid; place-items: center; }
+.cmp-label { position: absolute; top: 6px; font-size: 10px; font-weight: 700; background: rgba(0,0,0,0.65); padding: 1px 6px; border-radius: 8px; white-space: nowrap; pointer-events: none; }
+.cmp-label.l { right: 8px; } .cmp-label.r { left: 8px; }
+.scopes { display: flex; gap: 10px; align-items: center; padding: 4px 10px; background: var(--bg-1); border-top: 1px solid var(--line); }
+.scope { position: relative; background: #000; border-radius: 4px; overflow: hidden; height: 56px; }
+.scope canvas { display: block; height: 56px; }
+.scope span { position: absolute; left: 4px; top: 2px; font-size: 9px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.scope-stats { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-3); }
+.scope-stats .warn { color: var(--warn); }

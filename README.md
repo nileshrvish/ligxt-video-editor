@@ -56,6 +56,7 @@ Press **?** in the editor to see this list.
 | Ctrl + D | Duplicate clip |
 | M | Add marker at playhead |
 | T | Add a transition at the nearest cut (uses the last type you picked) |
+| \ | Before / after compare (drag the divider) |
 | N | Snapping on/off (hold Alt while dragging to invert) |
 | Ctrl + Z / Ctrl + Y | Undo / redo |
 | Ctrl + S | Save |
@@ -67,6 +68,15 @@ Press **?** in the editor to see this list.
 Preview: the scrub bar under the picture scrubs, **Safe areas** shows where Instagram's Reels UI covers the video, and the fullscreen button sits next to it. Music: select a music clip and click **Detect beats**. Beats become snap points, and you can drop markers on every beat or bar.
 
 Transitions: hover a cut on the main track and click **+**, or press **T**. Click the block to choose one of 21 types (fades, whip pans, slides, wipes, zoom, circle, pixelize, radial), set 0.2–2 s, or **Apply to all cuts**. Transitions are centred on the cut and use footage beyond each clip's in/out points, so your timing never moves. A ⚠ means a clip ran out of spare footage: the transition was shortened, or the edge frame is held.
+
+Colour & effects: select a clip and open **Colour & effects** in Properties.
+- **Presets** (Vintage 70s, Warm Film, Cool Teal, B&W, Faded, Bollywood Retro, Vivid, Golden Hour, Moody), each with an intensity slider, plus **My presets** (save a clip's filters with *Save these filters as my preset*).
+- **LUT**: pick a bundled LUT or **Import…** a 3D `.cube`, with intensity.
+- **Adjust**: exposure, brightness, contrast, highlights, shadows, whites, blacks, temperature, tint, saturation, vibrance, sharpen, blur. Double-click a slider to reset it.
+- **Effects**: film grain (amount, size), vignette, light leaks, VHS look, glow/bloom, chromatic aberration.
+- **Protect skin tones** (presets and LUTs, on by default) keeps faces from turning orange, green or grey. It is ignored for B&W.
+- **Copy / Paste / All / Reset** move filters between clips. **Adjustment** (timeline toolbar) adds an adjustment layer: its filters grade everything below it for its duration, so one grade can cover many clips.
+- Preview: **Before/After** shows a draggable split; **Scopes** shows a histogram, a waveform and how much of the picture is crushed or clipped.
 
 Timeline mouse: drag a clip to move it (or to another track of the same kind), drag its edges to trim, drag a marker flag to move it, double-click a track name to rename it. The main video track is magnetic by default (no gaps; dragging reorders). Turn that off with the **Magnetic** button.
 
@@ -92,6 +102,10 @@ cd frontend; npm run dev
 ```
 
 The project format is documented in `backend\app\models.py`. The ffmpeg graph builder is in `backend\app\render.py`. `POST /api/projects/<id>/export/preview-graph` returns the generated ffmpeg command without rendering it, which helps with debugging.
+
+## Bundled LUTs and licenses
+
+`luts\` holds four example LUTs (Teal & Orange, Bleach Bypass, Matte Fade, Sunset Warm). They were generated for this project by `scripts\make_luts.py` from simple colour formulas, contain no third-party material, and are released under **CC0 1.0** (public domain, see `luts\LICENSE.md`). LUTs you import are stored in `user_luts` and keep their own licenses.
 
 ## Troubleshooting
 

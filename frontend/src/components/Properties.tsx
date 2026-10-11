@@ -6,6 +6,7 @@ import * as ops from "../timeline/ops";
 import { mainTransitionPlans, TRANSITION_GROUPS, transitionLabel, UI_MIN } from "../timeline/transitions";
 import type { Aspect, Clip, FitMode, MediaMeta } from "../types";
 import { ASPECTS, clipDuration, fmtBytes, fmtDuration } from "../util";
+import FiltersPanel from "./FiltersPanel";
 import { Icon } from "./Icons";
 
 export default function Properties() {
@@ -77,6 +78,7 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
     });
   const maxOut = m && m.type !== "image" ? m.duration : 3600;
   const isVisual = trackType === "video" || trackType === "overlay";
+  if (clip.adjustment) return <AdjustmentProps clip={clip} trackId={trackId} />;
 
   return (
     <div className="props">
@@ -200,6 +202,8 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
         </div>
       )}
 
+      {isVisual && m && m.type !== "audio" && <FiltersPanel clip={clip} trackId={trackId} />}
+
       <div className="prop-group">
         <button className="btn danger" onClick={() => useEditor.getState().deleteSelectedClip()}>
           <Icon name="trash" size={14} /> Delete clip
@@ -246,6 +250,49 @@ function BeatsSection({ clip, m }: { clip: Clip; m: MediaMeta }) {
           {job ? <><Icon name="loader" size={14} className="spin" /> Detecting beats…</> : <><Icon name="music" size={14} /> Detect beats</>}
         </button>
       )}
+    </div>
+  );
+}
+
+function AdjustmentProps({ clip, trackId }: { clip: Clip; trackId: string }) {
+  const st = useEditor.getState;
+  const update = (fn: (c: Clip) => void, undoable = true) =>
+    st().commit((p) => {
+      const c = p.tracks.find((t) => t.id === trackId)?.clips.find((x) => x.id === clip.id);
+      if (!c) return;
+      fn(c);
+      ops.settle(p, c.id);
+    }, undoable);
+  return (
+    <div className="props">
+      <div>
+        <div className="label">Adjustment layer</div>
+        <h3>Grades everything below it</h3>
+        <div className="faint" style={{ fontSize: 12 }}>Its filters apply to the main track and the overlays under this track for as long as it lasts. Stretch it across many clips to grade them all at once.</div>
+      </div>
+      <div className="prop-group">
+        <div className="prop-row">
+          <label>Start at</label>
+          <NumberField value={clip.start} min={0} suffix="s" onCommit={(v) => st().commit((p) => ops.moveClip(p, clip.id, v))} />
+        </div>
+        <div className="prop-row">
+          <label>Length</label>
+          <NumberField value={clip.outPoint - clip.inPoint} min={0.1} suffix="s" onCommit={(v) => update((c) => void (c.outPoint = c.inPoint + v))} />
+        </div>
+        <div className="prop-row">
+          <label>Strength</label>
+          <div className="slider-row">
+            <input type="range" min={0} max={1} step={0.01} value={clip.transform.opacity}
+              onPointerDown={() => st().beginGesture()} onPointerUp={() => st().endGesture()}
+              onChange={(e) => update((c) => void (c.transform.opacity = +e.target.value), false)} />
+            <span className="mono faint" style={{ fontSize: 11 }}>{Math.round(clip.transform.opacity * 100)}%</span>
+          </div>
+        </div>
+      </div>
+      <FiltersPanel clip={clip} trackId={trackId} />
+      <div className="prop-group">
+        <button className="btn danger" onClick={() => st().deleteSelectedClip()}><Icon name="trash" size={14} /> Delete adjustment layer</button>
+      </div>
     </div>
   );
 }

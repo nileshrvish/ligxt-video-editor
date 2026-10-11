@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import { api, uploadMedia } from "../api";
-import type { Clip, MediaMeta, Project, TrackType } from "../types";
+import type { Clip, Filter, MediaMeta, Project, TrackType } from "../types";
 import * as ops from "../timeline/ops";
 import { cuts as cutPairs } from "../timeline/transitions";
-import { clipEnd, newClip, trackEnd } from "../util";
+import { clipEnd, newClip, projectDuration as projectDurationOf, trackEnd, uid } from "../util";
 import { toastError, useApp } from "./app";
 
 export type Selection =
@@ -67,6 +67,16 @@ interface EditorState {
   /** T key: add a transition at the cut nearest the playhead on the main track. */
   addTransitionNearPlayhead: () => void;
   lastTransition: { type: string; duration: number };
+  /** Before/after split position (0..1 of the width shows the ungraded frame), or null when off. */
+  compare: number | null;
+  setCompare: (v: number | null) => void;
+  /** Copied filter stack (copy/paste between clips). */
+  filterClipboard: Filter[] | null;
+  copyFilters: (clipId: string) => void;
+  pasteFilters: (clipIds: string[]) => void;
+  /** Replace a clip's filters. `undoable=false` while dragging a slider (wrap in begin/endGesture). */
+  setFilters: (clipId: string, filters: Filter[], undoable?: boolean) => void;
+  addAdjustmentLayer: () => void;
   setLastTransition: (t: { type: string; duration: number }) => void;
   duplicateSelected: () => void;
   addMarkerAtPlayhead: () => void;
@@ -96,6 +106,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   gestureStart: null,
   snapping: readSnapping(),
   lastTransition: { type: "fade", duration: 0.5 },
+  compare: null,
+  filterClipboard: null,
 
   load: async (id) => {
     const project = await api.getProject(id);
@@ -298,6 +310,50 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   setLastTransition: (lastTransition) => set({ lastTransition }),
+
+  setCompare: (compare) => set({ compare }),
+
+  copyFilters: (clipId) => {
+    const hit = get().project && ops.findClip(get().project!, clipId);
+    if (!hit) return;
+    set({ filterClipboard: structuredClone(hit.clip.filters) });
+    useApp.getState().toast({ kind: "info", title: `Copied ${hit.clip.filters.length} filter${hit.clip.filters.length === 1 ? "" : "s"}` });
+  },
+
+  pasteFilters: (clipIds) => {
+    const fl = get().filterClipboard;
+    if (!fl) return void useApp.getState().toast({ kind: "info", title: "Nothing copied yet", detail: "Copy filters from a clip first." });
+    get().commit((d) => {
+      for (const id of clipIds) {
+        const hit = ops.findClip(d, id);
+        if (hit && !hit.track.locked) hit.clip.filters = structuredClone(fl).map((f) => ({ ...f, id: uid() }));
+      }
+    });
+  },
+
+  setFilters: (clipId, filters, undoable = true) =>
+    get().commit((d) => {
+      const hit = ops.findClip(d, clipId);
+      if (hit) hit.clip.filters = filters;
+    }, undoable),
+
+  addAdjustmentLayer: () => {
+    const { project, playhead } = get();
+    if (!project) return;
+    const track = project.tracks.find((t) => t.type === "overlay" && !t.locked);
+    let newTrackId: string | null = null;
+    get().commit((d) => {
+      if (!track) {
+        newTrackId = ops.addTrack(d, "overlay");
+      }
+      const t = d.tracks.find((x) => x.id === (track?.id ?? newTrackId))!;
+      const total = Math.max(1, projectDurationOf(d));
+      const start = Math.min(playhead, Math.max(0, total - 1));
+      const clip: Clip = { ...newClip({ id: "", type: "image", duration: 0 } as unknown as MediaMeta, start), mediaId: null, adjustment: true, outPoint: Math.max(1, Math.min(5, total - start)) };
+      ops.insertClip(d, t.id, clip, start);
+      set({ selection: { kind: "clip", clipId: clip.id } });
+    });
+  },
 
   duplicateSelected: () => {
     const s = get().selection;

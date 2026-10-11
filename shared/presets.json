@@ -1,0 +1,62 @@
+{
+  "_doc": "Colour presets, shared by backend/app/grade.py and frontend/src/grade/math.ts. 'adjust' uses the same parameters as the Adjust panel (-100..100, exposure in stops). 'split' adds a tint to shadows/highlights (RGB offsets). 'fade' lifts blacks. 'mono' converts to black and white. 'effects' are added (scaled by the preset intensity) to the clip's own effects.",
+  "presets": {
+    "vintage70s": {
+      "label": "Vintage 70s",
+      "adjust": {"temperature": 28, "tint": 6, "contrast": -12, "saturation": -18, "highlights": -10},
+      "split": {"shadows": [0.0, 0.025, 0.05], "highlights": [0.07, 0.035, -0.035]},
+      "fade": 0.08,
+      "effects": {"grain": {"amount": 0.3, "size": 2.0}, "vignette": {"amount": 0.25}}
+    },
+    "warmfilm": {
+      "label": "Warm Film",
+      "adjust": {"temperature": 18, "tint": 3, "contrast": 6, "highlights": -18, "shadows": 10, "saturation": -6},
+      "split": {"shadows": [0.0, 0.01, 0.02], "highlights": [0.045, 0.02, -0.02]},
+      "fade": 0.035,
+      "effects": {"grain": {"amount": 0.2, "size": 1.5}}
+    },
+    "coolteal": {
+      "label": "Cool Teal",
+      "adjust": {"temperature": -14, "tint": -4, "contrast": 12, "saturation": 4},
+      "split": {"shadows": [-0.035, 0.025, 0.055], "highlights": [0.05, 0.015, -0.035]}
+    },
+    "bw": {
+      "label": "B&W",
+      "adjust": {"contrast": 18, "shadows": 6},
+      "mono": true
+    },
+    "faded": {
+      "label": "Faded",
+      "adjust": {"contrast": -22, "saturation": -22, "blacks": 18},
+      "fade": 0.12
+    },
+    "bollywoodretro": {
+      "label": "Bollywood Retro",
+      "adjust": {"temperature": 22, "tint": 9, "saturation": 10, "contrast": -8, "highlights": -12},
+      "split": {"shadows": [0.02, 0.0, 0.03], "highlights": [0.06, 0.03, -0.02]},
+      "fade": 0.06,
+      "effects": {"glow": {"amount": 0.2, "threshold": 0.7, "radius": 14}, "grain": {"amount": 0.25, "size": 2.0}}
+    },
+    "vivid": {
+      "label": "Vivid",
+      "adjust": {"vibrance": 35, "saturation": 8, "contrast": 14, "blacks": -6}
+    },
+    "goldenhour": {
+      "label": "Golden Hour",
+      "adjust": {"temperature": 34, "tint": 6, "highlights": 8, "shadows": 8, "saturation": 6},
+      "split": {"highlights": [0.07, 0.045, -0.02]},
+      "effects": {"glow": {"amount": 0.15, "threshold": 0.72, "radius": 18}}
+    },
+    "moody": {
+      "label": "Moody",
+      "adjust": {"exposure": -0.25, "contrast": 18, "saturation": -25, "shadows": -10},
+      "split": {"shadows": [-0.02, 0.01, 0.035], "highlights": [0.02, 0.01, -0.01]},
+      "effects": {"vignette": {"amount": 0.4}}
+    }
+  },
+  "vhs": {
+    "adjust": {"saturation": -15, "contrast": -10, "temperature": 6},
+    "fade": 0.05,
+    "chroma": 2.0
+  }
+}

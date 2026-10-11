@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, media, projects, render
+from . import config, luts, media, presets_api, projects, render
 from .ffmpeg_utils import ffmpeg_version, has_nvenc
 from .jobs import jobs
 
@@ -38,6 +38,8 @@ app = FastAPI(title="Ligxt Video Editor", lifespan=lifespan)
 app.include_router(media.router)
 app.include_router(projects.router)
 app.include_router(render.router)
+app.include_router(luts.router)
+app.include_router(presets_api.router)
 
 
 @app.exception_handler(Exception)

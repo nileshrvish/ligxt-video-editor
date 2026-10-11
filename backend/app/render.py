@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import math
 import re
+import shutil
+import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,6 +25,7 @@ from .jobs import JobContext, jobs
 from .media import load_meta, original_path
 from .models import Clip, Project
 from .projects import load_project
+from .grade import grade_chain, needs_grade, ref_scale
 from .transitions import ALL_TYPES, WHIP_TYPES, TransitionPlan, plan_transition
 
 router = APIRouter(prefix="/api", tags=["export"])
@@ -143,10 +147,12 @@ class Plan:
     duration: float
     output: Path
     fps: float
+    workdir: Path | None = None  # ffmpeg runs here (generated .cube LUTs are referenced by bare name)
 
 
 def build_plan(project: Project, out_path: Path, *, mode: str = "final",
-               range_start: float | None = None, range_end: float | None = None) -> Plan:
+               range_start: float | None = None, range_end: float | None = None,
+               workdir: Path | None = None) -> Plan:
     s = project.settings
     ex = project.export
     W, H = int(ex.width or s.width), int(ex.height or s.height)
@@ -171,6 +177,25 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                 if not original_path(m).exists():
                     raise RenderError(f"The original file for '{m['name']}' is missing from the media folder.")
                 metas[c.mediaId] = m
+
+    from .luts import load_cube
+    cubes: dict[str, dict] = {}
+    for t in project.tracks:
+        for c in t.clips:
+            for f in c.filters:
+                lid = (f.params or {}).get("lut") if f.type == "lut" else None
+                if lid and lid not in cubes:
+                    try:
+                        cubes[lid] = load_cube(lid)
+                    except (FileNotFoundError, Exception) as e:  # noqa: BLE001
+                        raise RenderError(f"A clip uses the LUT '{lid}', which is missing or invalid ({e}).") from e
+    if workdir is None:
+        workdir = CACHE_DIR / "_render" / "plan"
+    workdir.mkdir(parents=True, exist_ok=True)
+    rs = ref_scale(W, H)
+
+    def filt(c: Clip) -> list[dict]:
+        return [f.model_dump() for f in c.filters]
 
     fps = ex.fps
     if fps == "source":
@@ -235,6 +260,11 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         fitted = fit_chain(g, vin, c.fit or default_fit, W, H, bg)
         vout = g.label("cv")
         pad = f"tpad=start_mode=clone:start_duration={_f(lead)}:stop_mode=clone:stop_duration={_f(seg + 0.1)}"
+        if needs_grade(filt(c)):
+            pre_g = g.label("pg")
+            g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p[{pre_g}]")
+            fitted = grade_chain(g, pre_g, filt(c), W, H, rs=rs, fps=fps, t0=t_from, f0=int(round(t_from * fps)),
+                                 duration=seg, workdir=workdir, cubes=cubes)
         g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p,{pad},trim=end_frame={nf},setpts=PTS-STARTPTS[{vout}]")
         aout = g.label("ca")
         if m.get("hasAudio") and m["type"] == "video" and not c.muted and not main_muted and c.volume > 0:
@@ -330,6 +360,19 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         if t.type != "overlay" or t.hidden:
             continue
         for c in sorted(t.clips, key=lambda c: c.start):
+            if c.adjustment and not c.mediaId:
+                a_t, b_t = max(c.start, r0), min(c.start + clip_duration(c), r1)
+                if b_t - a_t <= EPS or not needs_grade(filt(c)):
+                    continue
+                keep, gin, out = g.label("ak"), g.label("ag"), g.label("vb")
+                g.add(f"[{v_base}]format=yuv420p,split[{keep}][{gin}]")
+                graded = grade_chain(g, gin, filt(c), W, H, rs=rs, fps=fps, t0=r0, f0=int(round(r0 * fps)),
+                                     duration=dur, workdir=workdir, cubes=cubes)
+                op = max(0.0, min(1.0, c.transform.opacity))
+                g.add(f"[{keep}][{graded}]blend=all_mode=normal:c0_opacity={_f(1 - op)}:c1_opacity={_f(1 - op)}:"
+                      f"c2_opacity={_f(1 - op)}:enable='between(t,{_f(a_t - r0)},{_f(b_t - r0)})'[{out}]")
+                v_base = out
+                continue
             if not c.mediaId or clip_duration(c) <= EPS:
                 continue
             m = metas[c.mediaId]
@@ -355,6 +398,13 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
             chain = [f"[{idx}:v]{hdr}{pre}fps={_f(fps)}", f"scale={geo['sw']}:{geo['sh']}"]
             if geo["crop"]:
                 chain.append(f"crop={geo['cw']}:{geo['ch']}")
+            if needs_grade(filt(c)):
+                lw, lh = (geo["cw"], geo["ch"]) if geo["crop"] else (geo["sw"], geo["sh"])
+                pre_g = g.label("og")
+                g.add(",".join(chain) + f",format=yuv420p[{pre_g}]")
+                graded = grade_chain(g, pre_g, filt(c), lw, lh, rs=rs, fps=fps, t0=a_t, f0=int(round(a_t * fps)),
+                                     duration=seg, workdir=workdir, cubes=cubes)
+                chain = [f"[{graded}]null"]
             chain.append("format=rgba")
             if c.transform.flipH:
                 chain.append("hflip")
@@ -435,7 +485,11 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
              "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
              "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
              "-t", _f(dur), "-movflags", "+faststart", str(out_path)]
-    return Plan(args=args, filter_script=script, duration=dur, output=out_path, fps=fps)
+    return Plan(args=args, filter_script=script, duration=dur, output=out_path, fps=fps, workdir=workdir)
+
+
+_names_lock = threading.Lock()
+_reserved: set[str] = set()
 
 
 def _export_name(project: Project, mode: str) -> Path:
@@ -444,7 +498,17 @@ def _export_name(project: Project, mode: str) -> Path:
     if base.lower().endswith(".mp4"):
         base = base[:-4]
     suffix = "_draft" if mode == "draft" else ""
-    return EXPORTS_DIR / f"{base}{suffix}_{time.strftime('%Y%m%d-%H%M%S')}.mp4"
+    stem = f"{base}{suffix}_{time.strftime('%Y%m%d-%H%M%S')}"
+    # Two exports in the same second must not overwrite each other (also reserve in-flight names).
+    with _names_lock:
+        n = 1
+        while True:
+            name = f"{stem}.mp4" if n == 1 else f"{stem}-{n}.mp4"
+            path = EXPORTS_DIR / name
+            if name not in _reserved and not path.exists() and not path.with_name(path.stem + ".part.mp4").exists():
+                _reserved.add(name)
+                return path
+            n += 1
 
 
 def sync_check(path: Path, expected: float, fps: float) -> dict:
@@ -459,10 +523,11 @@ def sync_check(path: Path, expected: float, fps: float) -> dict:
 
 def run_export(project: Project, mode: str, range_start: float | None, range_end: float | None):
     out = _export_name(project, mode)
-    plan = build_plan(project, out, mode=mode, range_start=range_start, range_end=range_end)
+    workdir = CACHE_DIR / "_render" / uuid.uuid4().hex[:12]
+    plan = build_plan(project, out, mode=mode, range_start=range_start, range_end=range_end, workdir=workdir)
 
     def job(ctx: JobContext) -> dict:
-        rdir = CACHE_DIR / "_render"
+        rdir = workdir
         rdir.mkdir(parents=True, exist_ok=True)
         script_path = rdir / f"{ctx.job.id}.txt"
         script_path.write_text(plan.filter_script, encoding="utf-8")
@@ -472,13 +537,13 @@ def run_export(project: Project, mode: str, range_start: float | None, range_end
         args[-1] = str(tmp)
         try:
             run_ffmpeg(args, plan.duration, lambda p: ctx.progress(p * 0.98, "Rendering"),
-                       ctx.cancelled, ctx.set_process)
+                       ctx.cancelled, ctx.set_process, cwd=str(rdir))
             tmp.replace(plan.output)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
         finally:
-            script_path.unlink(missing_ok=True)
+            shutil.rmtree(rdir, ignore_errors=True)
         ctx.progress(0.99, "Checking audio sync")
         sync = sync_check(plan.output, plan.duration, plan.fps)
         ctx.message("Done" if sync["ok"] else "Done (sync warning)")

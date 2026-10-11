@@ -131,6 +131,8 @@ export default function Editor({ projectId }: { projectId: string }) {
         s.splitAtPlayhead();
       } else if (k === "j" || k === "k" || k === "l" || k === "J" || k === "K" || k === "L") {
         s.shuttle(k.toLowerCase() as "j" | "k" | "l");
+      } else if (k === "\\") {
+        s.setCompare(s.compare == null ? 0.5 : null);
       } else if (k.toLowerCase() === "t") {
         s.addTransitionNearPlayhead();
       } else if (k.toLowerCase() === "m") {
@@ -293,6 +295,7 @@ const SHORTCUTS: [string, string, boolean?][] = [
   ["Ctrl + D", "Duplicate clip"],
   ["M", "Add marker"],
   ["T", "Add a transition at the nearest cut"],
+  ["\\", "Before / after compare"],
   ["N", "Snapping on / off"],
   ["Alt + drag", "Invert snapping while dragging"],
   ["Double-click track name", "Rename track"],

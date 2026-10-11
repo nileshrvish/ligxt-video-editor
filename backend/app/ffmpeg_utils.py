@@ -132,11 +132,12 @@ def run_ffmpeg(
     on_progress: Callable[[float], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     on_process: Callable[[subprocess.Popen], None] | None = None,
+    cwd: str | None = None,
 ) -> None:
     """Run ffmpeg with `-progress pipe:1`, reporting 0..1 progress. Raises FFmpegError on failure."""
     cmd = [FFMPEG, "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats", *args]
     proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd,
         encoding="utf-8", errors="replace", creationflags=CREATE_NO_WINDOW,
     )
     if on_process:
