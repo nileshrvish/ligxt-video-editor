@@ -128,3 +128,33 @@ def test_beats_rejects_silent_video(client, fixtures):
     v = upload(client, fixtures["silent"])
     r = client.post(f"/api/media/{v['id']}/beats")
     assert r.status_code == 400 and "no audio" in r.json()["detail"]
+
+
+def test_cuts_do_not_drift(client, tmp_path):
+    """Regression: per-segment frame rounding accumulated (JPEG photos, mixed 0.5/1/2-beat lengths:
+    cuts were 3.6 frames late after 20 cuts). Segments are now snapped to the absolute frame grid."""
+    import re
+    imgs = []
+    for i, color in enumerate(["0x101010", "0xf0f0f0", "0x808080"]):  # very different brightness for scdet
+        f = tmp_path / f"photo{i}.jpg"
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                        f"color=c={color}:s=960x1280", "-frames:v", "1", str(f)], check=True)
+        imgs.append(upload(client, f))
+    beat = 60 / 119.6
+    pattern = [4, 4, 2, 2, 4] + [2] * 6 + [1] * 12  # beats per photo, like a beat-sync reel
+    clips, t = [], 0.0
+    for i, nb in enumerate(pattern):
+        d = round(nb * beat + (0.009 if i % 2 else -0.012), 3)  # real beat grids are a little uneven
+        clips.append({"mediaId": imgs[i % 3]["id"], "start": round(t, 3), "inPoint": 0, "outPoint": d, "fit": "fill"})
+        t = round(t + d, 3)
+    p = _project_with(client, clips)
+    res = _export(client, p, mode="draft")
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-i", res["path"], "-vf", "scdet=threshold=8", "-f", "null", "-"],
+                       capture_output=True, text=True)
+    cuts = [float(x) for x in re.findall(r"lavfi\.scd\.time:\s*([\d.]+)", r.stderr)]
+    planned = [c["start"] for c in clips[1:]]
+    assert len(cuts) == len(planned), (cuts, planned)
+    worst = max(min(abs(c - pl) for c in cuts) for pl in planned)
+    assert worst <= 0.5 / 30 + 2e-3, f"a cut is off by {worst * 30:.2f} frames"
+    d = stream_durations(res["path"])
+    assert abs(d["video"] - t) < 1 / 30 + 0.01

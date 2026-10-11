@@ -164,10 +164,19 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     segs_a: list[str] = []
     main_muted = main.muted if main else False
 
-    def gap(length: float) -> None:
+    # Segment boundaries are snapped to the output frame grid (absolute, not per segment), so
+    # rounding never accumulates: every cut lands within half a frame of its timeline time.
+    def frame_of(t: float) -> int:
+        return int(round((t - r0) * fps))
+
+    def gap(a_t: float, b_t: float) -> None:
+        nf = frame_of(b_t) - frame_of(a_t)
+        if nf <= 0:
+            return
         v, a = g.label("gv"), g.label("ga")
-        g.add(f"color=c={bg}:s={W}x{H}:r={_f(fps)}:d={_f(length)},format=yuv420p,setsar=1[{v}]")
-        g.add(f"anullsrc=r=48000:cl=stereo,atrim=duration={_f(length)}[{a}]")
+        g.add(f"color=c={bg}:s={W}x{H}:r={_f(fps)}:d={_f(nf / fps + 0.1)},format=yuv420p,setsar=1,"
+              f"trim=end_frame={nf}[{v}]")
+        g.add(f"anullsrc=r=48000:cl=stereo,atrim=duration={_f(nf / fps)}[{a}]")
         segs_v.append(v)
         segs_a.append(a)
 
@@ -180,8 +189,12 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         if b_t - a_t <= EPS:
             continue  # fully covered by an earlier overlapping clip
         if a_t - cursor > EPS:
-            gap(a_t - cursor)
-        seg = b_t - a_t
+            gap(cursor, a_t)
+        nf = frame_of(b_t) - frame_of(a_t)
+        if nf <= 0:
+            cursor = b_t
+            continue  # shorter than half a frame at this position
+        seg = nf / fps
         speed = c.speed or 1
         src_in = c.inPoint + (a_t - c_start) * speed
         m = metas[c.mediaId]
@@ -199,7 +212,8 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         g.add(f"[{idx}:v]{hdr}{pre}fps={_f(fps)}[{vin}]")
         fitted = fit_chain(g, vin, fit, W, H, bg)
         vout = g.label("cv")
-        g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p,trim=duration={_f(seg)},setpts=PTS-STARTPTS[{vout}]")
+        g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p,tpad=stop_mode=clone:stop=2,"
+              f"trim=end_frame={nf},setpts=PTS-STARTPTS[{vout}]")
         segs_v.append(vout)
 
         aout = g.label("ca")
@@ -213,7 +227,7 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         cursor = b_t
 
     if r1 - cursor > EPS:
-        gap(r1 - cursor)
+        gap(cursor, r1)
 
     n = len(segs_v)
     joined = "".join(f"[{v}][{a}]" for v, a in zip(segs_v, segs_a))

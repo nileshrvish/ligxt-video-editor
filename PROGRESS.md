@@ -71,5 +71,7 @@ Read this first at the start of every session.
 - Gotcha in PowerShell 5.1: `nativeExe | Select-Object -First 1` sets a non-zero `$LASTEXITCODE`. Capture the output to a variable first.
 - Speed: the export uses pitch-preserving `atempo`. The preview uses the browser's playbackRate. The speed UI arrives in Phase 5.
 - Chrome throttles requestAnimationFrame when the window isn't focused. The preview clock uses wall time, so it catches up, but browser-automation timing readings can look jumpy.
-- Beat detection was tested on synthetic click tracks only; check it on real songs during Phase 7 (templates use cut timing).
+- Beat detection was tested on synthetic click tracks and one real song (119.6 BPM, 46 beats, steady grid).
+- Fixed 2026-10-11: main-track cuts drifted late (up to 3.6 frames after 20 cuts with JPEG photos and mixed beat lengths). Segments are now snapped to the absolute output frame grid (`trim=end_frame`, with `tpad` clone padding), so cuts land within half a frame. Regression test: `test_cuts_do_not_drift`.
+- Gotcha: ffmpeg `drawtext` on Windows needs an explicit `fontfile=` (no fontconfig). Relevant for Phase 6 text/captions.
 - The media library is per project (`project.media`); files stay in `media\` even when removed from a project (no purge UI yet).
