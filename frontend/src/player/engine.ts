@@ -12,6 +12,8 @@ import { fadeGain, layerGeometry } from "./geometry";
 import { TransitionRenderer } from "./transitions";
 import { FilterRenderer, type GradeContext } from "../grade/renderer";
 import { needsGrade } from "../grade/math";
+import { duckGain, duckRegions, hasMotion, rectMatrix, roundedRect, rnd, srcTime, transformAt, valueAt } from "../motion/motion";
+import { loadWave, type Wave } from "./waves";
 
 const PREROLL = 1.5; // seconds: load + seek upcoming clips ahead of time
 const KEEP_IDLE_MS = 4000; // drop elements unused for this long
@@ -71,6 +73,10 @@ export class PreviewEngine {
   private fx = new FilterRenderer();
   /** Before/after split: fraction of the width showing the ungraded frame (null = off). */
   private compare: number | null = null;
+  /** Speech regions for auto-ducking music (recomputed when the project or media change). */
+  private duckFor: { project: Project | null; media: Record<string, MediaMeta> | null; regions: [number, number][] } =
+    { project: null, media: null, regions: [] };
+  private waves = new Map<string, Wave>(); // by waveform url, once loaded
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d", { alpha: false })!;
@@ -187,7 +193,8 @@ export class PreviewEngine {
       }
     }
     const active = this.collect(p, s.media, t);
-    this.sync(active, t, s.playing, s.playing ? this.clock.rate : 0, p.settings.fps, now);
+    const speech = p.tracks.some((tr) => tr.type === "music" && tr.autoDuck?.enabled) ? this.speech(p, s.media) : [];
+    this.sync(active, t, s.playing, s.playing ? this.clock.rate : 0, p.settings.fps, now, speech);
     if (s.playing || this.dirty) {
       const ok = this.draw(p, active, t);
       this.dirty = !ok;
@@ -249,6 +256,42 @@ export class PreviewEngine {
       }
     }
     return out;
+  }
+
+  /** Speech-like regions on the timeline (main video + audio tracks, from the waveforms), the same
+   *  rules as backend render.speech_regions. Waveforms load in the background; until then: none. */
+  private speech(p: Project, media: Record<string, MediaMeta>): [number, number][] {
+    const c = this.duckFor;
+    if (c.project === p && c.media === media) return c.regions;
+    const sources: [number, number, number[]][] = [];
+    let missing = false;
+    for (const tr of p.tracks) {
+      if (tr.muted || (tr.type !== "video" && tr.type !== "audio")) continue;
+      for (const clip of tr.clips) {
+        const m = clip.mediaId ? media[clip.mediaId] : undefined;
+        if (!m || !m.hasAudio || !m.waveform || clip.muted || clip.volume <= 0 || m.sfx) continue;
+        const url = m.waveform;
+        const wf = this.waves.get(url);
+        if (!wf) {
+          missing = true;
+          loadWave(url).then((w) => {
+            this.waves.set(url, w);
+            this.duckFor = { project: null, media: null, regions: [] };
+          }).catch(() => void 0);
+          continue;
+        }
+        const D = clipDuration(clip);
+        const vals: number[] = [];
+        for (let i = 0; i < Math.floor(D * 100); i++) {
+          const j = Math.floor(srcTime(clip, i / 100).src * (wf.peaksPerSecond || 100));
+          vals.push(j >= 0 && j < wf.peaks.length ? wf.peaks[j] / 255 : 0);
+        }
+        sources.push([clip.start, clip.start + D, vals]);
+      }
+    }
+    const regions = duckRegions(sources);
+    this.duckFor = missing ? { project: null, media: null, regions } : { project: p, media, regions };
+    return regions;
   }
 
   // ------------------------------------------------------------ media elements
@@ -322,18 +365,24 @@ export class PreviewEngine {
     return img;
   }
 
-  private sync(active: Active[], t: number, playing: boolean, rate: number, fps: number, now: number) {
+  private sync(active: Active[], t: number, playing: boolean, rate: number, fps: number, now: number, speech: [number, number][]) {
     for (const a of active) {
       if (a.adjust) continue;
       const slot = this.slotFor(a, now);
       if (!slot) continue;
       const el = slot.el;
-      const speed = a.clip.speed || 1;
-      let want = a.clip.inPoint + (t - a.clip.start) * speed;
-      if (a.preroll) want = a.clip.inPoint - this.incomingHalf(a) * speed; // where its (handle) footage starts
+      // Source time from the shared math (speed, ramps, reverse, freeze). Preroll: where its
+      // (handle) footage starts.
+      const tau = a.preroll ? -this.incomingHalf(a) : t - a.clip.start;
+      const st = srcTime(a.clip, tau);
+      let want = st.src;
+      const speed = st.speed;
       // Past the footage (transition freeze): hold the first/last frame.
       if (a.media.type !== "image") want = Math.max(0, Math.min(want, Math.max(0, a.media.duration - 0.04)));
-      const forward = playing && rate > 0 && !a.preroll;
+      // Reversed and frozen clips can't be played by a media element: they're stepped frame by
+      // frame (seeked) and silent in the preview. The export plays reversed audio.
+      const stepped = speed <= 0;
+      const forward = playing && rate > 0 && !a.preroll && !stepped;
       if (forward) {
         el.playbackRate = Math.max(0.0625, Math.min(16, speed * rate));
         if (el.paused) {
@@ -350,8 +399,12 @@ export class PreviewEngine {
         const audible = a.audible && forward && rate <= MAX_AUDIBLE_RATE;
         const inFootage = want > 0.001 && want < a.media.duration - 0.05;
         const xf = a.tr ? (a.tr.side === "A" ? 1 - a.tr.p : a.tr.p) : 1; // linear, like FFmpeg's afade
+        // Same as backend layers.gain_expr: keyframed volume x track x fades x ducking.
+        const ct = t - a.clip.start;
+        const duck = a.track.type === "music" && a.track.autoDuck?.enabled ? duckGain(speech, t, a.track.autoDuck.amount ?? -12) : 1;
         const g = audible && inFootage
-          ? a.clip.volume * a.track.volume * xf * fadeGain(t - a.clip.start, clipDuration(a.clip), a.clip.fadeIn, a.clip.fadeOut)
+          ? valueAt(a.clip.keyframes?.volume, ct, a.clip.volume) * a.track.volume * xf
+            * fadeGain(ct, clipDuration(a.clip), a.clip.fadeIn, a.clip.fadeOut) * duck
           : 0;
         slot.gain.gain.setTargetAtTime(g, this.audio.currentTime, 0.015);
       }
@@ -442,13 +495,16 @@ export class PreviewEngine {
       const w = full ? W : cw, h = full ? H : ch;
       const c2 = sized(cv, w, h);
       clear(c2, w, h);
-      this.drawLayer(c2, a, src, p, full ? 1 : k);
+      this.drawLayer(c2, a, src, p, full ? 1 : k, t);
       if (bypass || !needsGrade(a.clip.filters)) return cv;
       const graded = this.fx.apply(cv, a.clip.filters, this.gradeCtx(p, t, W, H));
       if (!graded) return null;
       if (graded !== cv) {
         c2.setTransform(1, 0, 0, 1, 0, 0);
+        // Keyframed grade strength: the graded picture over the ungraded one (export: blend).
+        c2.globalAlpha = Math.max(0, Math.min(1, valueAt(a.clip.keyframes?.intensity, t - a.clip.start, 1)));
         c2.drawImage(graded, 0, 0, w, h);
+        c2.globalAlpha = 1;
       }
       return cv;
     };
@@ -481,14 +537,15 @@ export class PreviewEngine {
         const graded = this.fx.apply(this.layerAdj, a.clip.filters, this.gradeCtx(p, t, W, H));
         if (!graded) return false;
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalAlpha = Math.max(0, Math.min(1, a.clip.transform?.opacity ?? 1));
+        const strength = valueAt(a.clip.keyframes?.intensity, t - a.clip.start, 1);
+        ctx.globalAlpha = Math.max(0, Math.min(1, (a.clip.transform?.opacity ?? 1) * strength));
         ctx.drawImage(graded, 0, 0, cw, ch);
         ctx.globalAlpha = 1;
         continue;
       }
       if (a.isMain) {
         if (bypass || !needsGrade(a.clip.filters)) {
-          this.drawLayer(ctx, a, sources[j]!, p, k);
+          this.drawLayer(ctx, a, sources[j]!, p, k, t);
         } else {
           const fr = mainFrame(this.layerA, a, sources[j]!, false);
           if (!fr) return false;
@@ -497,61 +554,111 @@ export class PreviewEngine {
         }
         continue;
       }
-      // Overlay clip: grade its own picture (at its export layer size) before placing it.
+      // Overlay clip: grade its own picture at its fitted size (scale 1, export: the same) before
+      // placing it with its (keyframed) transform.
       if (bypass || !needsGrade(a.clip.filters)) {
-        this.drawLayer(ctx, a, sources[j]!, p, k);
+        this.drawLayer(ctx, a, sources[j]!, p, k, t);
         continue;
       }
       const src = sources[j]!;
-      const sw = (src as HTMLVideoElement).videoWidth || (src as HTMLImageElement).naturalWidth || a.media.width || W;
-      const sh = (src as HTMLVideoElement).videoHeight || (src as HTMLImageElement).naturalHeight || a.media.height || H;
-      const g = layerGeometry(sw, sh, a.clip, false, p.settings.background.mode, W, H);
-      const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
-      const scale = Math.max(0.01, a.clip.transform?.scale ?? 1);
+      const [sw, sh] = this.sourceSize(src, a, W, H);
       const fill = (a.clip.fit ?? "fit") === "fill";
-      const ew = fill ? Math.min(even(g.dw), even(W * scale)) : even(g.dw);
-      const eh = fill ? Math.min(even(g.dh), even(H * scale)) : even(g.dh);
-      const lw = Math.max(2, Math.round(ew * k)), lh = Math.max(2, Math.round(eh * k));
+      const [x0, y0, rw, rh] = roundedRect(sw, sh, a.clip.transform?.crop, fill, W, H);
+      const f0 = Math.min(W / rw, H / rh);
+      const gw = Math.max(2, rnd((rw * f0) / 2) * 2), gh = Math.max(2, rnd((rh * f0) / 2) * 2);
+      const lw = Math.max(2, Math.round(gw * k)), lh = Math.max(2, Math.round(gh * k));
       const c2 = sized(this.layerO, lw, lh);
       c2.setTransform(1, 0, 0, 1, 0, 0);
+      c2.globalAlpha = 1;
       c2.clearRect(0, 0, lw, lh);
-      c2.drawImage(src, (lw - g.dw * k) / 2, (lh - g.dh * k) / 2, g.dw * k, g.dh * k);
-      const graded = this.fx.apply(this.layerO, a.clip.filters, { ...this.gradeCtx(p, t, ew, eh) });
+      c2.drawImage(src, x0, y0, rw, rh, 0, 0, lw, lh);
+      const graded = this.fx.apply(this.layerO, a.clip.filters, this.gradeCtx(p, t, gw, gh));
       if (!graded) return false;
+      const tv = transformAt(a.clip, t - a.clip.start);
+      const m = rectMatrix([0, 0, gw, gh], W, H, tv);
       ctx.save();
-      ctx.translate(g.cx * k, g.cy * k);
-      if (g.rotation) ctx.rotate(g.rotation);
-      if (g.flipH || g.flipV) ctx.scale(g.flipH ? -1 : 1, g.flipV ? -1 : 1);
-      ctx.globalAlpha = g.opacity;
-      ctx.drawImage(graded, -lw / 2, -lh / 2, lw, lh);
+      ctx.setTransform(k * m[0], k * m[1], k * m[2], k * m[3], k * m[4], k * m[5]);
+      ctx.globalAlpha = Math.max(0, Math.min(1, tv.opacity));
+      ctx.drawImage(graded, 0, 0, lw, lh, 0, 0, gw, gh);
       ctx.restore();
     }
     return true;
   }
 
-  private drawLayer(ctx: CanvasRenderingContext2D, a: Active, src: CanvasImageSource, p: Project, k: number) {
-    const { width: W, height: H } = p.settings;
+  private bd = { small: document.createElement("canvas"), pad: document.createElement("canvas") };
+
+  /** The blurred "cover" backdrop of the blur fit mode, made like the export's blur_backdrop:
+   *  cover-crop at 1/8 size, gaussian sigma 6 (edges extended, like gblur), upscaled, then
+   *  darkened by 0.06 (eq=brightness=-0.06). */
+  private backdrop(src: CanvasImageSource, sw: number, sh: number, W: number, H: number): HTMLCanvasElement {
+    const w = Math.floor(W / 8), h = Math.floor(H / 8), m = 24;
+    const pad = this.bd.pad;
+    if (pad.width !== w + 2 * m || pad.height !== h + 2 * m) { pad.width = w + 2 * m; pad.height = h + 2 * m; }
+    const px = pad.getContext("2d")!;
+    px.filter = "none";
+    const f = Math.max(w / sw, h / sh);
+    const cw = w / f, ch = h / f; // source rect shown
+    px.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, m, m, w, h);
+    // Extend the edges outwards so the blur doesn't pull in transparency.
+    px.drawImage(pad, m, m, w, 1, m, 0, w, m);
+    px.drawImage(pad, m, m + h - 1, w, 1, m, m + h, w, m);
+    px.drawImage(pad, m, 0, 1, h + 2 * m, 0, 0, m, h + 2 * m);
+    px.drawImage(pad, m + w - 1, 0, 1, h + 2 * m, m + w, 0, m, h + 2 * m);
+    const small = this.bd.small;
+    if (small.width !== w || small.height !== h) { small.width = w; small.height = h; }
+    const sx = small.getContext("2d")!;
+    sx.globalCompositeOperation = "source-over";
+    sx.filter = "blur(6px)";
+    sx.drawImage(pad, -m, -m);
+    sx.filter = "none";
+    // Subtract ~0.06 (|c - 15| == c - 15 except in near-black areas).
+    sx.globalCompositeOperation = "difference";
+    sx.fillStyle = "rgb(15,15,15)";
+    sx.fillRect(0, 0, w, h);
+    sx.globalCompositeOperation = "source-over";
+    return small;
+  }
+
+  private sourceSize(src: CanvasImageSource, a: Active, W: number, H: number): [number, number] {
     const sw = (src as HTMLVideoElement).videoWidth || (src as HTMLImageElement).naturalWidth || a.media.width || W;
     const sh = (src as HTMLVideoElement).videoHeight || (src as HTMLImageElement).naturalHeight || a.media.height || H;
-    const g = layerGeometry(sw, sh, a.clip, a.isMain, p.settings.background.mode, W, H);
-    if (g.blurBackground) {
-      const f = Math.max(W / sw, H / sh);
+    return [sw, sh];
+  }
+
+  /** Draw a clip's picture at timeline time t. Main-track clips without any transform use the plain
+   *  fit/fill/blur placement (export: fit_chain); everything else goes through the shared layer
+   *  matrix with the export's whole-pixel crop rect (export: layers.motion_layer). */
+  private drawLayer(ctx: CanvasRenderingContext2D, a: Active, src: CanvasImageSource, p: Project, k: number, t: number) {
+    const { width: W, height: H } = p.settings;
+    const [sw, sh] = this.sourceSize(src, a, W, H);
+    const mode = a.clip.fit ?? (a.isMain ? p.settings.background.mode : "fit");
+    if (a.isMain && mode === "blur") {
       ctx.save();
-      ctx.filter = `blur(${Math.max(4, 40 * k)}px) brightness(0.88)`;
-      ctx.drawImage(src, (W - sw * f) / 2 * k, (H - sh * f) / 2 * k, sw * f * k, sh * f * k);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(this.backdrop(src, sw, sh, W, H), 0, 0, W * k, H * k);
       ctx.restore();
     }
-    ctx.save();
-    ctx.translate(g.cx * k, g.cy * k);
-    if (g.rotation) ctx.rotate(g.rotation);
-    if (g.flipH || g.flipV) ctx.scale(g.flipH ? -1 : 1, g.flipV ? -1 : 1);
-    ctx.globalAlpha = g.opacity;
-    if (g.cw < g.dw - 0.5 || g.ch < g.dh - 0.5) {
-      ctx.beginPath();
-      ctx.rect((-g.cw / 2) * k, (-g.ch / 2) * k, g.cw * k, g.ch * k);
-      ctx.clip();
+    if (a.isMain && !hasMotion(a.clip)) {
+      const g = layerGeometry(sw, sh, a.clip, true, p.settings.background.mode, W, H);
+      ctx.save();
+      ctx.translate(g.cx * k, g.cy * k);
+      if (g.cw < g.dw - 0.5 || g.ch < g.dh - 0.5) {
+        ctx.beginPath();
+        ctx.rect((-g.cw / 2) * k, (-g.ch / 2) * k, g.cw * k, g.ch * k);
+        ctx.clip();
+      }
+      ctx.drawImage(src, (-g.dw / 2) * k, (-g.dh / 2) * k, g.dw * k, g.dh * k);
+      ctx.restore();
+      return;
     }
-    ctx.drawImage(src, (-g.dw / 2) * k, (-g.dh / 2) * k, g.dw * k, g.dh * k);
+    const tv = transformAt(a.clip, t - a.clip.start);
+    const rect = roundedRect(sw, sh, a.clip.transform?.crop, mode === "fill", W, H);
+    const m = rectMatrix(rect, W, H, tv);
+    const [x0, y0, rw, rh] = rect;
+    ctx.save();
+    ctx.setTransform(k * m[0], k * m[1], k * m[2], k * m[3], k * m[4], k * m[5]);
+    ctx.globalAlpha = Math.max(0, Math.min(1, tv.opacity));
+    ctx.drawImage(src, x0, y0, rw, rh, x0, y0, rw, rh);
     ctx.restore();
   }
 

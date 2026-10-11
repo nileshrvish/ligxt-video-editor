@@ -7,6 +7,9 @@ import type { Clip, MediaMeta, Track, TrackType } from "../types";
 import { clipDuration, clipEnd, contentEnd, TRACK_COLORS } from "../util";
 import { Icon } from "./Icons";
 import { MEDIA_DND } from "./MediaLibrary";
+import { loadWave } from "../player/waves";
+import * as E from "../motion/edit";
+import { api } from "../api";
 
 const TRACK_ICONS: Record<string, string> = { video: "film", overlay: "layout", text: "text", audio: "volume", music: "music" };
 const SNAP_PX = 8;
@@ -237,6 +240,7 @@ export default function Timeline() {
         </button>
         <span className="tl-sep" />
         <AddTrackMenu />
+        <SfxMenu />
         <span className="spacer" />
         <button className="btn ghost icon sm" title="Zoom out (−)" onClick={() => st().setZoom(pps / 1.25)}>
           <Icon name="zoomOut" size={15} />
@@ -400,6 +404,38 @@ function AddTrackMenu() {
   );
 }
 
+/** Sound effects (bundled, synthesised, CC0): at the playhead, or a whoosh on every transition. */
+function SfxMenu() {
+  const [lib, setLib] = useState<{ id: string; name: string; peak: number }[]>([]);
+  useEffect(() => {
+    api.sfxLibrary().then((r) => setLib(r.sfx), () => void 0);
+  }, []);
+  const toast = useApp.getState().toast;
+  return (
+    <select
+      className="input"
+      style={{ height: 24, fontSize: 12, width: 78 }}
+      value=""
+      title="Sound effects: placed so their peak lands on the playhead"
+      onChange={async (e) => {
+        const v = e.target.value;
+        const st = useEditor.getState();
+        if (v === "@transitions") {
+          const n = await st.whooshTransitions();
+          toast({ kind: n ? "success" : "info", title: n ? `Added ${n} whoosh${n === 1 ? "" : "es"} on the transitions` : "No (non-fade) transitions on the main track" });
+        } else if (v) {
+          const n = await st.addSfx(v, [st.playhead], v === "hit" ? 0.4 : 0.3);
+          if (n) toast({ kind: "success", title: "Sound effect added", detail: "On an SFX audio track, its peak on the playhead." });
+        }
+      }}
+    >
+      <option value="">+ SFX</option>
+      {lib.map((x) => <option key={x.id} value={x.id}>{x.name} at playhead</option>)}
+      <option value="@transitions">Whoosh on every transition</option>
+    </select>
+  );
+}
+
 function TrackHead({ t, canRemove }: { t: Track; canRemove: boolean }) {
   const [editing, setEditing] = useState(false);
   const commit = useEditor((s) => s.commit);
@@ -453,6 +489,14 @@ function TrackHead({ t, canRemove }: { t: Track; canRemove: boolean }) {
           <button className="btn ghost icon xs" title={t.muted ? "Unmute track" : "Mute track"} onClick={() => toggle("muted")}>
             <Icon name={t.muted ? "mute" : "volume"} size={12} style={{ color: t.muted ? "var(--err)" : undefined }} />
           </button>
+        )}
+        {t.type === "music" && (
+          <button className={`btn ghost xs ${t.autoDuck?.enabled ? "toggle on" : ""}`} style={{ fontSize: 9, padding: "0 3px" }}
+            title={`Auto-duck: lower the music ${t.autoDuck?.amount ?? -12} dB while there is speech on the video and audio tracks`}
+            onClick={() => commit((p) => {
+              const x = p.tracks.find((y) => y.id === t.id)!;
+              x.autoDuck = { enabled: !x.autoDuck?.enabled, amount: x.autoDuck?.amount ?? -12 };
+            })}>duck</button>
         )}
         <button className="btn ghost icon xs" title={t.locked ? "Unlock track" : "Lock track"} onClick={() => toggle("locked")}>
           <Icon name={t.locked ? "lock" : "unlock"} size={12} style={{ color: t.locked ? "var(--warn)" : undefined }} />
@@ -514,6 +558,65 @@ function Playhead({ pps }: { pps: number }) {
   return <div className="playhead" style={{ left: t * pps - 1 }} />;
 }
 
+function speedBadge(c: Clip): string | null {
+  if (c.freezeFrame != null) return "freeze";
+  const parts = [];
+  if (c.speedRamp && (c.speedRamp as { points?: unknown[] }).points?.length) parts.push("ramp");
+  else if ((c.speed || 1) !== 1) parts.push(`${+(c.speed || 1).toFixed(2)}×`);
+  if (c.reverse) parts.push("rev");
+  return parts.length ? parts.join(" ") : null;
+}
+
+/** Keyframe diamonds along the bottom of a clip: click to jump there, drag to retime (every
+ *  property's keyframe at that time moves together). */
+function KeyDiamonds({ c, pps }: { c: Clip; pps: number }) {
+  const playhead = useEditor((s) => s.playhead);
+  const keys = E.keyTimes(c);
+  if (!keys.length) return null;
+  const down = (e: React.PointerEvent, time: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const st = useEditor.getState();
+    const x0 = e.clientX;
+    let cur = time;
+    let moved = false;
+    st.beginGesture();
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - x0;
+      if (!moved && Math.abs(dx) < 3) return;
+      moved = true;
+      const next = Math.max(0, Math.min(clipDuration(c), time + dx / pps));
+      const from = cur;
+      useEditor.getState().commit((p) => {
+        const hit = ops.findClip(p, c.id);
+        if (hit) E.retimeKeys(hit.clip, from, next);
+      }, false);
+      cur = +next.toFixed(4);
+      useEditor.getState().setPlayhead(c.start + cur);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      useEditor.getState().endGesture();
+      if (!moved) {
+        useEditor.getState().select({ kind: "clip", clipId: c.id });
+        useEditor.getState().setPlayhead(c.start + time);
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return (
+    <>
+      {keys.map((k) => (
+        <div key={k.time} className={`tl-kf ${Math.abs(playhead - c.start - k.time) < E.KEY_EPS ? "on" : ""}`}
+          style={{ left: k.time * pps }} title={`${k.props.join(", ")} at ${k.time.toFixed(2)} s. Click to jump, drag to retime.`}
+          onPointerDown={(e) => down(e, k.time)} />
+      ))}
+    </>
+  );
+}
+
 const ClipBlock = memo(function ClipBlock({
   c, track, pps, selected, onPointerDown,
 }: { c: Clip; track: Track; pps: number; selected: boolean; onPointerDown: (e: React.PointerEvent, c: Clip, t: Track) => void }) {
@@ -531,6 +634,8 @@ const ClipBlock = memo(function ClipBlock({
     >
       {visual && m?.thumbnail && <div className="cthumb" style={{ backgroundImage: `url(${m.thumbnail})` }} />}
       {c.filters?.length > 0 && !c.adjustment && <span className="fx-dot" title={`${c.filters.length} filter(s)`}>fx</span>}
+      {speedBadge(c) && <span className="fx-dot" style={{ right: c.filters?.length && !c.adjustment ? 22 : 4, color: "#9fe3ff" }}>{speedBadge(c)}</span>}
+      {!track.locked && w > 20 && <KeyDiamonds c={c} pps={pps} />}
       {showWave && m && <Waveform m={m} c={c} width={w} muted={c.muted || track.muted} />}
       {m?.beats && (track.type === "audio" || track.type === "music") && pps * (60 / (m.bpm || 120)) >= 4 &&
         ops.clipBeats(c, m.beats).map((b) => <div key={b} className="beat" style={{ left: (b - c.start) * pps }} />)}
@@ -545,19 +650,6 @@ const ClipBlock = memo(function ClipBlock({
   );
 });
 
-const waveCache = new Map<string, Promise<{ peaksPerSecond: number; peaks: number[] }>>();
-export function loadWave(url: string) {
-  if (!waveCache.has(url)) {
-    waveCache.set(
-      url,
-      fetch(url).then((r) => {
-        if (!r.ok) throw new Error(`waveform ${r.status}`);
-        return r.json();
-      }),
-    );
-  }
-  return waveCache.get(url)!;
-}
 
 function Waveform({ m, c, width, muted }: { m: MediaMeta; c: Clip; width: number; muted: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);

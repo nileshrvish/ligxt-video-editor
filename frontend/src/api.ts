@@ -53,6 +53,8 @@ export const api = {
   getMediaOne: (id: string) => req<MediaMeta>("GET", `/api/media/${id}`),
   reprocessMedia: (id: string) => req<{ jobId: string }>("POST", `/api/media/${id}/reprocess`),
   detectBeats: (id: string) => req<{ jobId: string }>("POST", `/api/media/${id}/beats`),
+  sfxLibrary: () => req<{ sfx: { id: string; name: string; peak: number }[] }>("GET", "/api/media/sfx/library"),
+  importSfx: (id: string) => req<{ media: MediaMeta; jobId: string }>("POST", `/api/media/sfx/${id}/import`),
 
   exportProject: (p: Project, mode: string, rangeStart?: number, rangeEnd?: number) =>
     req<{ jobId: string }>("POST", `/api/projects/${p.id}/export`, { project: p, mode, rangeStart, rangeEnd }),

@@ -116,6 +116,30 @@ export function protectSkin(orig: RGB, graded: RGB): RGB {
   return [0, 1, 2].map((i) => graded[i] * (1 - w) + clamp01(orig[i] * k) * w) as RGB;
 }
 
+export function hueSat(c: RGB): [number, number] {
+  const [r, g, b] = c;
+  const v = Math.max(r, g, b), d = v - Math.min(r, g, b);
+  const s = v > 1e-6 ? d / Math.max(v, 1e-6) : 0;
+  const dd = Math.max(d, 1e-6);
+  let h = v === r ? ((((g - b) / dd) % 6) + 6) % 6 : v === g ? (b - r) / dd + 2 : (r - g) / dd + 4;
+  h = d < 1e-6 ? 0 : h * 60;
+  return [h, s];
+}
+
+/** Keep one hue range in colour; everything else becomes black and white (same weights as B&W). */
+export function selective(c: RGB, p: Record<string, unknown>): RGB {
+  const hue = ((Number(p.hue ?? 25) % 360) + 360) % 360;
+  const rng = Math.max(0, Number(p.range ?? 25));
+  const soft = Math.max(0.5, Number(p.softness ?? 15));
+  const [h, s] = hueSat(c);
+  let dh = Math.abs(h - hue);
+  dh = Math.min(dh, 360 - dh);
+  const lo = Number(p.satLow ?? 0.08), hi = Number(p.satHigh ?? 0.2);
+  const w = (1 - smoothstep(rng, rng + soft, dh)) * smoothstep(lo, Math.max(lo + 0.01, hi), s);
+  const y = clamp01(c[0]) * MONO[0] + clamp01(c[1]) * MONO[1] + clamp01(c[2]) * MONO[2];
+  return [y + (c[0] - y) * w, y + (c[1] - y) * w, y + (c[2] - y) * w];
+}
+
 export function sampleCube(cube: Cube, c: RGB): RGB {
   const n = cube.size, t = cube.table;
   const x = [0, 1, 2].map((i) => clamp01((c[i] - cube.min[i]) / (cube.max[i] - cube.min[i])) * (n - 1));
@@ -160,6 +184,12 @@ export function gradeColor(c0: RGB, filters: F[], cubes: Record<string, Cube>): 
     if (prm(f).skinProtect !== false && !mono) graded = protectSkin(c, graded);
     c = [c[0] + (graded[0] - c[0]) * I, c[1] + (graded[1] - c[1]) * I, c[2] + (graded[2] - c[2]) * I];
   }
+  for (const f of act) {
+    if (f.type !== "selective" || Number(f.intensity ?? 1) <= 0) continue;
+    const I = Number(f.intensity ?? 1);
+    const s = selective(c, prm(f));
+    c = [c[0] + (s[0] - c[0]) * I, c[1] + (s[1] - c[1]) * I, c[2] + (s[2] - c[2]) * I];
+  }
   const vhs = effects(filters).vhs.amount;
   if (vhs > 0) {
     const v = presetColor(c, VHS);
@@ -196,7 +226,7 @@ export function hasColor(filters: F[]): boolean {
   for (const f of filters) {
     if (!on(f)) continue;
     if (f.type === "adjust" && COLOR_KEYS.some((k) => Number(prm(f)[k] ?? 0))) return true;
-    if ((f.type === "preset" || f.type === "lut") && Number(f.intensity ?? 1) > 0) return true;
+    if ((f.type === "preset" || f.type === "lut" || f.type === "selective") && Number(f.intensity ?? 1) > 0) return true;
   }
   return effects(filters).vhs.amount > 0;
 }

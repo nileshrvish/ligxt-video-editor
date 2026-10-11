@@ -90,6 +90,7 @@ class Clip(Base):
     filters: list[Filter] = Field(default_factory=list)
     text: Optional[TextStyle] = None
     adjustment: bool = False  # adjustment layer (overlay track, no media): grades everything below it
+    speedRamp: Optional[dict] = None  # {"points": [{"u": 0..1, "speed": 0.1..4}, ...]}
 
     @property
     def duration(self) -> float:
@@ -114,6 +115,7 @@ class Track(Base):
     locked: bool = False
     volume: float = 1
     magnetic: Optional[bool] = None  # main video track: clips stay packed (default on)
+    autoDuck: Optional[dict] = None  # music tracks: {"enabled": bool, "amount": dB}
     clips: list[Clip] = Field(default_factory=list)
 
 

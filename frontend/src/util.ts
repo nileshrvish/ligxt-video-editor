@@ -1,10 +1,12 @@
 import type { Clip, MediaMeta, Project, Track } from "./types";
+import { clipDuration as motionClipDuration } from "./motion/motion";
 
 export const uid = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
 
+/** Timeline length of a clip (speed, ramps and freeze frames included). */
 export function clipDuration(c: Clip): number {
-  return Math.max(0, (c.outPoint - c.inPoint) / (c.speed || 1));
+  return Math.max(0, motionClipDuration(c));
 }
 
 export function clipEnd(c: Clip): number {

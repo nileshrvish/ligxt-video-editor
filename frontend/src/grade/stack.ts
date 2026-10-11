@@ -108,3 +108,22 @@ export function setEffect(filters: Filter[], key: EffectKey, params: Record<stri
 
 /** Fresh ids so pasted / preset stacks don't share ids with their source. */
 export const withNewIds = (filters: Filter[]) => clone(filters).map((f) => ({ ...f, id: uid() }));
+
+export function selectiveOf(filters: Filter[]): Filter | undefined {
+  return filters.find((f) => f.type === "selective");
+}
+
+/** Selective colour: keep one hue range, the rest black and white. `params` null removes it. */
+export function setSelective(filters: Filter[], params: Record<string, number> | null, patch: Partial<Filter> = {}): Filter[] {
+  const out = clone(filters);
+  const i = out.findIndex((f) => f.type === "selective");
+  if (params === null) return i >= 0 ? out.filter((_, j) => j !== i) : out;
+  const prev = i >= 0 ? out[i] : undefined;
+  const f: Filter = {
+    id: prev?.id ?? uid(), type: "selective", name: "", intensity: prev?.intensity ?? 1,
+    params: { hue: 25, range: 20, softness: 12, satLow: 0.08, satHigh: 0.2, ...(prev?.params ?? {}), ...params }, enabled: true, ...patch,
+  };
+  if (i >= 0) out[i] = f;
+  else out.push(f);
+  return out;
+}

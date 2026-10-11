@@ -38,6 +38,8 @@ export interface Clip {
   text: Record<string, unknown> | null;
   /** Adjustment layer (overlay track, no media): grades everything below it for its duration. */
   adjustment?: boolean;
+  /** Speed ramp: speed (0.1-4x) along the clip, u = 0..1 of its timeline length. */
+  speedRamp?: { points: { u: number; speed: number }[]; preset?: string } | null;
   [extra: string]: unknown;
 }
 
@@ -45,6 +47,8 @@ export interface Track {
   id: string; type: TrackType; name: string;
   muted: boolean; hidden: boolean; locked: boolean; volume: number;
   magnetic?: boolean; // main video track only (default true)
+  /** Music tracks: lower the music under speech on the video/audio tracks. */
+  autoDuck?: { enabled: boolean; amount: number } | null;
   clips: Clip[];
 }
 
@@ -91,6 +95,8 @@ export interface MediaMeta {
   error: string | null;
   bpm?: number;
   beats?: number[]; // beat times in source seconds
+  sfx?: string; // bundled sound effect id (sfx/), if this is one
+  sfxPeak?: number; // seconds into the effect that should land on the cut
 }
 
 export interface Job {

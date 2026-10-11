@@ -132,6 +132,32 @@ def protect_skin(orig: np.ndarray, graded: np.ndarray) -> np.ndarray:
     return graded * (1 - w) + target * w
 
 
+def hue_sat(c: np.ndarray):
+    """HSV hue (degrees) and saturation, same formula as skin_weight."""
+    v = c.max(axis=-1)
+    d = v - c.min(axis=-1)
+    s = np.where(v > 1e-6, d / np.maximum(v, 1e-6), 0.0)
+    r, g, b = c[..., 0], c[..., 1], c[..., 2]
+    dd = np.maximum(d, 1e-6)
+    h = np.where(v == r, ((g - b) / dd) % 6, np.where(v == g, (b - r) / dd + 2, (r - g) / dd + 4)) * 60
+    return np.where(d < 1e-6, 0.0, h), s
+
+
+def selective(c: np.ndarray, p: dict) -> np.ndarray:
+    """Keep one hue range in colour; everything else becomes black and white (same weights as B&W)."""
+    hue = float(p.get("hue", 25)) % 360
+    rng = max(0.0, float(p.get("range", 25)))
+    soft = max(0.5, float(p.get("softness", 15)))
+    h, s = hue_sat(c)
+    dh = np.abs(h - hue)
+    dh = np.minimum(dh, 360 - dh)
+    lo, hi = float(p.get("satLow", 0.08)), float(p.get("satHigh", 0.2))
+    w = (1 - smoothstep(rng, rng + soft, dh)) * smoothstep(lo, max(lo + 0.01, hi), s)
+    y = np.clip(c, 0, 1) @ MONO
+    grey = np.repeat(y[..., None], 3, axis=-1)
+    return grey + (c - grey) * w[..., None]
+
+
 def sample_cube(cube: dict, c: np.ndarray) -> np.ndarray:
     """Trilinear lookup into a parsed .cube LUT."""
     n = cube["size"]
@@ -183,6 +209,9 @@ def grade_color(c: np.ndarray, filters: list[dict], cubes: dict[str, dict]) -> n
         if (f.get("params") or {}).get("skinProtect", True) and not mono:
             graded = protect_skin(c, graded)
         c = c + (graded - c) * I
+    for f in active:
+        if f.get("type") == "selective" and float(f.get("intensity", 1)) > 0:
+            c = c + (selective(c, f.get("params") or {}) - c) * float(f.get("intensity", 1))
     vhs = effects(filters)["vhs"]["amount"]
     if vhs > 0:
         c = c + (preset_color(c, PRESETS["vhs"]) - c) * vhs
@@ -227,7 +256,7 @@ def has_color(filters: list[dict]) -> bool:
             continue
         if f.get("type") == "adjust" and any(float((f.get("params") or {}).get(k) or 0) for k in ADJUST_KEYS[:11]):
             return True
-        if f.get("type") in ("preset", "lut") and float(f.get("intensity", 1)) > 0:
+        if f.get("type") in ("preset", "lut", "selective") and float(f.get("intensity", 1)) > 0:
             return True
     return effects(filters)["vhs"]["amount"] > 0
 

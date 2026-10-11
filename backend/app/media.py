@@ -327,6 +327,40 @@ def delete_media(mid: str):
     return {"ok": True}
 
 
+SFX_DIR = config.ROOT / "sfx"
+
+
+@router.get("/sfx/library")
+def sfx_library():
+    out = []
+    for p in sorted(SFX_DIR.glob("*.wav")):
+        side = p.with_suffix(".json")
+        info = json.loads(side.read_text(encoding="utf-8")) if side.exists() else {}
+        out.append({"id": p.stem, "name": info.get("name", p.stem), "peak": info.get("peak", 0.0)})
+    return {"sfx": out}
+
+
+@router.post("/sfx/{sid}/import")
+def sfx_import(sid: str):
+    """Add a bundled sound effect to the media library (a normal audio media item)."""
+    if not re.fullmatch(r"[a-z0-9-]{1,40}", sid) or not (SFX_DIR / f"{sid}.wav").exists():
+        raise HTTPException(404, "Unknown sound effect.")
+    side = SFX_DIR / f"{sid}.json"
+    info = json.loads(side.read_text(encoding="utf-8")) if side.exists() else {}
+    mid = uuid.uuid4().hex[:12]
+    d = media_dir(mid)
+    d.mkdir(parents=True)
+    dest = d / "original.wav"
+    shutil.copyfile(SFX_DIR / f"{sid}.wav", dest)
+    meta = {"id": mid, "name": f"SFX {info.get('name', sid)}.wav", "type": "audio", "file": f"media/{mid}/original.wav",
+            "size": dest.stat().st_size, "imported": time.time(), **probe(str(dest)),
+            "thumbnail": None, "waveform": None, "proxy": None, "proxyStatus": "none", "status": "processing",
+            "error": None, "sfx": sid, "sfxPeak": float(info.get("peak", 0.0))}
+    save_meta(meta)
+    job = queue_processing(meta)
+    return {"media": meta, "jobId": job.id}
+
+
 @router.post("/{mid}/beats")
 def detect_beats(mid: str):
     """Background job: detect tempo + beat times; stored in the media metadata (bpm, beats)."""

@@ -11,11 +11,11 @@ Read this first at the start of every session.
 | 2b | Canvas preview player (J/K/L, scrubbing, safe areas), audible music/audio in preview, overlay compositing (preview + export), beat detection | **Done** (2026-10-11) |
 | 3 | Transitions centred on the cut using handles (xfade types + custom whip pan) | **Done** (2026-10-11) |
 | 4 | Filters & colour (adjustments, presets, effects, LUTs, skin protection, adjustment layers, compare, scopes) | **Done** (2026-10-11) |
-| 5 | Clip editing (crop, keyframes, speed, reverse, freeze, aspect) + audio (fades, detach, ducking) | Next |
-| 6 | Text, auto-captions (faster-whisper), export presets polish | |
+| 5 | Clip editing (transform + on-canvas handles, keyframes + easing, motion presets, speed/ramps/reverse/freeze, selective colour) + audio (fades, volume keyframes, detach, auto-ducking, SFX) | **Done** (2026-10-11) |
+| 6 | Text, auto-captions (faster-whisper), export presets polish | Next |
 | 7 | Style templates | |
 
-Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (39) and `cd frontend; npm test` (69).
+Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (51) and `cd frontend; npm test` (90).
 Git: commit to `master` and push after each tested phase or fix.
 
 ## Phase 1: what exists
@@ -72,6 +72,18 @@ Git: commit to `master` and push after each tested phase or fix.
 - Bundled LUTs: `luts/` (4 CC0 LUTs from `scripts/make_luts.py`); imported LUTs go to `user_luts/`, user presets to `presets/` (both gitignored).
 - **Parity measured in the browser** (24 variants: 9 presets, 6 effects, adjust, blur, sharpen, 2 LUTs with/without skin protection, stack, adjustment layer, graded overlay; 9x16 area blocks): all ≤ 5.7/255, baseline 3.0. The harness waits on `__ligxtPreview.lastFrameT` (the time of the last fully composed frame), not on fixed delays.
 
+## Phase 5: what exists
+
+- **Shared motion maths**: `backend/app/motion.py` and `frontend/src/motion/motion.ts` (easing, keyframe interpolation, layer matrix, speed ramps, source-time mapping, ducking), checked against `shared/motion_cases.json`. Keyframe times are seconds from the clip's start. Easings: linear, in (u³), out, in-out (cubic), punch (overshoot `1+3.2(u-1)³+2.2(u-1)²`).
+- **Transform** for every visual clip (main track too): crop → (fill: centre-crop to the canvas aspect) → fit → scale/rotate/flip about the centre → offset x/y. One affine matrix (setTransform order) is used by the preview (`ctx.setTransform` + `drawImage` of the whole-pixel crop rect) and the export (`layers.motion_layer`: crop, scale to the needed density, 2 px transparent pad, `perspective` sense=source with per-frame corner expressions, opacity keyframes via `sendcmd` on `colorchannelmixer`). Main-track clips without any transform keep the plain fit/fill/blur path.
+- **Channels layered on top of the base keyframes**: `punch` (scale multiplier) and `shakeX/shakeY/shakeR` (offsets), so beat punches and camera shake never disturb a Ken Burns move. Presets (`motion/presets.ts`, `motion/edit.ts`): zoom in/out (keeps a focal point still), pan ←→↑↓ (zooms just enough, never past the edge), punch-in at the playhead, shake (amount, duration; seeded, decays).
+- **Grade strength keyframes** (`intensity`): main clips blend graded over ungraded (`blend` with `sendcmd`); adjustment layers multiply their strength per frame.
+- **Speed**: constant 0.25-4x, ramps (curve editor + 4 presets) approximated by 16 constant-speed pieces, pitch-preserving `atempo`, reverse (`reverse`/`areverse`), freeze frame (split + hold). Changing speed rescales keyframes. Each output frame shows the last source frame at or before its time (frame-aligned seek, true offsets, `fps round=up start_time=0`), exactly like a paused `<video>`; frame-exact test for speed/ramp/reverse/freeze. The preview steps reversed/frozen clips by seeking and keeps them silent.
+- **Audio**: gain = volume keyframes x track x linear fades (all clips) x ducking (`volume eval=frame`). Auto-duck (music tracks, default -12 dB, attack 0.15 s, release 0.45 s) under speech found in the waveforms of video/audio clips (sound effects excluded). Detach audio copies the clip to an audio track and mutes the video. Sound effects: `scripts/make_sfx.py` synthesises `sfx/` (whoosh, fast whoosh, hit, riser; CC0) with a `peak` time; `/api/media/sfx/library` + `/import`; placed so the peak lands on the playhead or on every non-fade transition (SFX tracks).
+- **Selective colour** filter (hue, range, softness, grey gate, intensity; eyedropper in the preview) in the colour pipeline after presets/LUTs.
+- UI: Properties > Transform (sliders with ◆ add/remove keyframe, ◀ ▶ jump, easing per keyframe, flips, rotate 90°, crop), Motion presets, Speed (slider, ramp presets + curve editor, reverse, freeze), Audio (volume ◆, fades, detach, auto-duck), timeline keyframe diamonds (click = jump, drag = retime), speed badges, `duck` toggle on music track heads, `+ SFX` menu; on-canvas handles (drag = move with centre snap, corners = scale, knob = rotate, Shift = 15°).
+- **Parity measured in the browser** (12 variants + graded overlay, 2 times each; 9x16 area blocks, MAE/255, mandelbrot test image where the static baseline is ~6): Ken Burns 6.3-6.5, pan 6.6, static rotate/flip/crop 4.9, punch+shake 6.4-6.7, opacity keyframes 2.4-3.8, grade-strength keyframes 4.4-5.7, selective colour 5.4, blur background with motion 7.1-7.3 (13 before the preview backdrop was rebuilt like the export's), video 2x/reverse/ramp/motion 5.2-5.9 (one 2x sample at 9.2 sits exactly on a source-frame boundary). Geometry: best match at zero offset everywhere.
+
 ## Decisions
 
 - Project length = end of the main video track (music running longer is cut). `util.projectDuration` and `render.build_plan` agree.
@@ -82,13 +94,13 @@ Git: commit to `master` and push after each tested phase or fix.
 - The preview composes each frame off-screen and only shows complete frames (no black frames while grading assets load).
 - Main-track segments are snapped to the absolute output frame grid (`trim=end_frame`), so cuts land within half a frame (fixed a drift of up to 3.6 frames after 20 cuts; regression test `test_cuts_do_not_drift`).
 - Track stacking: main video is the bottom layer; overlay tracks are drawn in listed order (lower rows on top).
-- Main-track clip transform is not applied yet (preview and export ignore it); overlays use it. Phase 5 adds it for the main track (needed for Ken Burns on photos).
+- Main-track clip transform: applied since Phase 5 (any transform or keyframe switches the clip to the matrix path).
+- Blur fit mode: the preview builds the backdrop like the export (1/8 size cover, gaussian sigma 6 with extended edges, upscale, -0.06).
 
-## Next (Phase 5: clip editing + audio)
+## Next (Phase 6: text, captions, export presets)
 
-- Crop, rotate, flip, scale, position for main-track clips too (preview and export currently ignore main-track transform); keyframes (position, scale, rotation, opacity) for Ken Burns / punch-ins; speed 0.25–4x with pitch-preserving audio; freeze frame; reverse; canvas switch with fit/fill/blur.
-- Audio: per-clip fades, detach audio, music fades, auto-ducking, sync check.
-- Keyframed opacity would let adjustment layers fade in (e.g. ease into the golden ending).
+- Text clips (fonts with an explicit `fontfile=` on Windows), animated titles using the Phase 5 keyframes, auto-captions with faster-whisper, export presets polish.
+- Reel idea: a hook line in the first second inside the safe areas.
 
 ## The user's reel ("Beat Sync Reel", project in projects\)
 
@@ -96,13 +108,15 @@ Git: commit to `master` and push after each tested phase or fix.
 - The user wants it enhanced after every phase to a professional, viral-reel standard.
 - Phase 3 pass (2026-10-11): whip pans centred on location changes (fastest point of each whip lands on the beat), a white flash into the B&W breakdown, a whip up onto the drop, hard stutter cuts inside each location and through the 1-beat peak, and a 0.5 s fade into the golden-hour outro. 14 hard cuts within 0.016 s of a beat. Export `exports\Beat Sync Reel_20261011-200643.mp4`.
 - Phase 4 pass (2026-10-11): snapshot kept as project **"Beat Sync Reel v3"** + `exports\Beat Sync Reel v3.mp4` (re-rendered with the edge fix). Colour match (per-clip adjust: studio 1 +0.76 EV / studio 2 −0.55 EV to equal mean luma 0.37 and matched WB; orange house exposure/WB; mural tint at half strength; church door already consistent). Tracks "Grade: overall" (Warm Film 55 %, contrast −10, highlights −8, grain 0.12, vignette 0.22), "Grade: sections" (B&W 5.97–7.96 with contrast +28; drop+peak 7.96–19.97 vibrance/contrast/glow; golden ending 19.97–end: Golden Hour 100 % + warmth + light leak 0.38 + glow), "Grade: flashes" (4-frame exposure+bloom flash at the drop, 3-frame at the peak). Export `exports\Beat Sync Reel v4.mp4`; comparisons in `exports\v4 comparison\`.
-- Ideas for later phases: P5 Ken Burns on every photo, punch-in on the drop, zoom pulses on beats, fade the golden layer in with keyframed opacity; P6 hook text in the first second inside safe areas. Offer the selective-colour B&W variant (orange glasses kept) if the user prefers it.
+- Phase 4b (2026-10-11): the B&W breakdown keeps only the orange glasses in colour (selective colour hue 19, range 12, softness 10, grey gate 0.28-0.40). Snapshot **"Beat Sync Reel v4b"** + `exports\Beat Sync Reel v4b.mp4`.
+- Phase 5 pass (2026-10-11): eased Ken Burns zoom or pan on all 24 shots (directions alternate; studio shots zoom anchored to the top edge so the faces move down, away from the Reels header; other zooms keep the face still), punch-ins on the drop landing 7.964 and the strongest kicks 8.963, 10.96, 16.951, 17.461, 19.458, a 0.35 s 9 px shake on the drop landing, synthesised whooshes on the 6 whip pans (peak on the cut) and a hit on the drop on two SFX tracks. Every frame validated: no edges, faces never pushed into the UI zones; all cuts on beats. No video clips in the reel, so no speed ramp. Snapshot **"Beat Sync Reel v5"** + `exports\Beat Sync Reel v5.mp4`; comparisons in `exports\v5 comparison\`.
+- Ideas: P6 hook text in the first second inside the safe areas; captions for the song's lyric moments.
 
 ## Known issues / notes
 
 - Gotcha in PowerShell 5.1: `nativeExe | Select-Object -First 1` sets a non-zero `$LASTEXITCODE`. Capture the output to a variable first.
 - Gotcha: ffmpeg `drawtext` on Windows needs an explicit `fontfile=` (no fontconfig). Relevant for Phase 6.
-- Speed: the export uses pitch-preserving `atempo`; the preview uses the browser's playbackRate. The speed UI arrives in Phase 5.
+- Speed: the export uses pitch-preserving `atempo`; the preview uses the browser's playbackRate (pitch preserved by default). Reversed clips are silent in the preview only.
 - Chrome throttles requestAnimationFrame when the window isn't focused; the preview clock uses wall time, so it catches up.
 - Beat detection tested on synthetic click tracks and one real song (steady 119.6 BPM grid).
 - Docs patches: use scripts that assert each replacement (a silent `str.replace` once dropped the 2b PROGRESS update).

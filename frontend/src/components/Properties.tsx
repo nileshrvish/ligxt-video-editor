@@ -7,6 +7,7 @@ import { mainTransitionPlans, TRANSITION_GROUPS, transitionLabel, UI_MIN } from 
 import type { Aspect, Clip, FitMode, MediaMeta } from "../types";
 import { ASPECTS, clipDuration, fmtBytes, fmtDuration } from "../util";
 import FiltersPanel from "./FiltersPanel";
+import MotionPanel, { PropSlider, useClipTime, useClipUpdate } from "./MotionPanel";
 import { Icon } from "./Icons";
 
 export default function Properties() {
@@ -119,28 +120,6 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
         {m?.type === "image" && <div className="faint" style={{ fontSize: 11 }}>Photos: the out point sets how long the photo shows.</div>}
       </div>
 
-      {trackType === "overlay" && (
-        <div className="prop-group">
-          <div className="label">Overlay position</div>
-          <div className="prop-row">
-            <label>Scale</label>
-            <NumberField value={clip.transform.scale * 100} min={1} max={400} step={5} suffix="%" onCommit={(v) => update((c) => void (c.transform.scale = v / 100))} />
-          </div>
-          <div className="prop-row">
-            <label>X / Y</label>
-            <div className="row" style={{ gap: 4 }}>
-              <NumberField value={clip.transform.x} step={10} suffix="px" onCommit={(v) => update((c) => void (c.transform.x = v))} />
-              <NumberField value={clip.transform.y} step={10} suffix="px" onCommit={(v) => update((c) => void (c.transform.y = v))} />
-            </div>
-          </div>
-          <div className="prop-row">
-            <label>Opacity</label>
-            <NumberField value={Math.round(clip.transform.opacity * 100)} min={0} max={100} step={5} suffix="%" onCommit={(v) => update((c) => void (c.transform.opacity = v / 100))} />
-          </div>
-          <div className="faint" style={{ fontSize: 11 }}>Picture-in-picture: try 40% scale and X/Y offsets. Full transform and keyframe editing arrive in Phase 5.</div>
-        </div>
-      )}
-
       {(trackType === "audio" || trackType === "music") && m && <BeatsSection clip={clip} m={m} />}
 
       {isVisual && (
@@ -159,48 +138,9 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
         </div>
       )}
 
-      {(m?.hasAudio ?? false) && (
-        <div className="prop-group">
-          <div className="label">Audio</div>
-          <div className="prop-row">
-            <label>Volume</label>
-            <div className="slider-row">
-              <input
-                type="range" min={0} max={2} step={0.01} value={clip.volume}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value);
-                  useEditor.getState().commit((p) => {
-                    const c = p.tracks.find((t) => t.id === trackId)?.clips.find((c) => c.id === clip.id);
-                    if (c) c.volume = v;
-                  }, false);
-                }}
-                onPointerDown={() => useEditor.getState().beginGesture()}
-                onPointerUp={() => useEditor.getState().endGesture()}
-              />
-              <span className="mono faint" style={{ fontSize: 11 }}>{Math.round(clip.volume * 100)}%</span>
-            </div>
-          </div>
-          <div className="prop-row">
-            <label>Mute</label>
-            <label className="row" style={{ cursor: "pointer" }}>
-              <input type="checkbox" checked={clip.muted} onChange={(e) => update((c) => void (c.muted = e.target.checked))} />
-              <span className="muted">Mute this clip</span>
-            </label>
-          </div>
-          {(trackType === "audio" || trackType === "music") && (
-            <>
-              <div className="prop-row">
-                <label>Fade in</label>
-                <NumberField value={clip.fadeIn} min={0} max={10} step={0.1} suffix="s" onCommit={(v) => update((c) => void (c.fadeIn = v))} />
-              </div>
-              <div className="prop-row">
-                <label>Fade out</label>
-                <NumberField value={clip.fadeOut} min={0} max={10} step={0.1} suffix="s" onCommit={(v) => update((c) => void (c.fadeOut = v))} />
-              </div>
-            </>
-          )}
-        </div>
-      )}
+      {isVisual && m && m.type !== "audio" && <MotionPanel clip={clip} trackType={trackType} m={m} />}
+
+      {(m?.hasAudio ?? false) && <AudioSection clip={clip} trackType={trackType} m={m!} />}
 
       {isVisual && m && m.type !== "audio" && <FiltersPanel clip={clip} trackId={trackId} />}
 
@@ -208,8 +148,52 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
         <button className="btn danger" onClick={() => useEditor.getState().deleteSelectedClip()}>
           <Icon name="trash" size={14} /> Delete clip
         </button>
-        <div className="faint" style={{ fontSize: 11 }}>Crop, keyframes, speed, filters and transitions arrive in later phases.</div>
       </div>
+    </div>
+  );
+}
+
+function AudioSection({ clip, trackType, m }: { clip: Clip; trackType: string; m: MediaMeta }) {
+  const update = useClipUpdate(clip.id);
+  const tau = useClipTime(clip);
+  const project = useEditor((s) => s.project!);
+  const track = project.tracks.find((t) => t.clips.some((c) => c.id === clip.id));
+  const detached = project.tracks.some((t) => t.clips.some((c) => c.detachedFrom === clip.id));
+  const canDetach = (trackType === "video" || trackType === "overlay") && m.type === "video" && !detached;
+  return (
+    <div className="prop-group mo">
+      <div className="label">Audio{m.sfx ? " · sound effect" : ""}</div>
+      <PropSlider clip={clip} prop="volume" label="Volume" tau={tau} update={update} min={0} max={200} step={1} scale={100} fmt={(v) => `${Math.round(v * 100)}%`} />
+      <div className="prop-row">
+        <label>Mute</label>
+        <label className="row" style={{ cursor: "pointer" }}>
+          <input type="checkbox" checked={clip.muted} onChange={(e) => update((c) => void (c.muted = e.target.checked))} />
+          <span className="muted">Mute this clip</span>
+        </label>
+      </div>
+      <div className="prop-row">
+        <label>Fade in</label>
+        <NumberField value={clip.fadeIn} min={0} max={10} step={0.1} suffix="s" onCommit={(v) => update((c) => void (c.fadeIn = v))} />
+      </div>
+      <div className="prop-row">
+        <label>Fade out</label>
+        <NumberField value={clip.fadeOut} min={0} max={10} step={0.1} suffix="s" onCommit={(v) => update((c) => void (c.fadeOut = v))} />
+      </div>
+      {canDetach && (
+        <button className="btn sm" title="Move the sound to its own clip on an audio track (the video clip is muted)"
+          onClick={() => useEditor.getState().detachAudio(clip.id)}>Detach audio</button>
+      )}
+      {detached && <div className="faint" style={{ fontSize: 11 }}>Audio detached to an audio track.</div>}
+      {track?.type === "music" && (
+        <label className="row fl-check" title="Lower the music while there is speech on the video and audio tracks">
+          <input type="checkbox" checked={!!track.autoDuck?.enabled}
+            onChange={(e) => useEditor.getState().commit((p) => {
+              const t = p.tracks.find((x) => x.id === track.id)!;
+              t.autoDuck = { enabled: e.target.checked, amount: t.autoDuck?.amount ?? -12 };
+            })} />
+          Auto-duck under speech ({track.autoDuck?.amount ?? -12} dB)
+        </label>
+      )}
     </div>
   );
 }
@@ -256,6 +240,8 @@ function BeatsSection({ clip, m }: { clip: Clip; m: MediaMeta }) {
 
 function AdjustmentProps({ clip, trackId }: { clip: Clip; trackId: string }) {
   const st = useEditor.getState;
+  const update2 = useClipUpdate(clip.id);
+  const tau = useClipTime(clip);
   const update = (fn: (c: Clip) => void, undoable = true) =>
     st().commit((p) => {
       const c = p.tracks.find((t) => t.id === trackId)?.clips.find((x) => x.id === clip.id);
@@ -287,6 +273,10 @@ function AdjustmentProps({ clip, trackId }: { clip: Clip; trackId: string }) {
               onChange={(e) => update((c) => void (c.transform.opacity = +e.target.value), false)} />
             <span className="mono faint" style={{ fontSize: 11 }}>{Math.round(clip.transform.opacity * 100)}%</span>
           </div>
+        </div>
+        <div className="mo">
+          <PropSlider clip={clip} prop="intensity" label="Animate" tau={tau} update={update2} min={0} max={100} step={1} scale={100} fmt={(v) => `${Math.round(v * 100)}%`} />
+          <div className="faint" style={{ fontSize: 11 }}>Set ◆ keyframes here to fade the grade in or out over time (multiplies the strength).</div>
         </div>
       </div>
       <FiltersPanel clip={clip} trackId={trackId} />

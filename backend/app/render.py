@@ -25,6 +25,8 @@ from .jobs import JobContext, jobs
 from .media import load_meta, original_path
 from .models import Clip, Project
 from .projects import load_project
+from . import layers as LY
+from . import motion as MO
 from .grade import TO_GBRP, grade_chain, needs_grade, ref_scale
 from .transitions import ALL_TYPES, WHIP_TYPES, TransitionPlan, plan_transition
 
@@ -79,7 +81,15 @@ def atempo(speed: float) -> str:
 
 
 def clip_duration(c: Clip) -> float:
-    return max(0.0, (c.outPoint - c.inPoint) / (c.speed or 1))
+    return max(0.0, MO.clip_duration(c.model_dump()))
+
+
+def blur_backdrop(g: Graph, src: str, W: int, H: int) -> str:
+    """The blurred 'cover' background used by the blur fit mode (same as in fit_chain)."""
+    out = g.label("bbg")
+    g.add(f"[{src}]scale={W // 8}:{H // 8}:force_original_aspect_ratio=increase,crop={W // 8}:{H // 8},"
+          f"gblur=sigma=6,scale={W}:{H},eq=brightness=-0.06,setsar=1,format=yuv420p[{out}]")
+    return out
 
 
 def fit_chain(g: Graph, src: str, mode: str, W: int, H: int, bg: str) -> str:
@@ -232,46 +242,59 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         segs_v.append(v)
         segs_a.append(a)
 
+    def frame_at_fn(c: Clip, tau0: float):
+        base = frame_of(c.start + tau0)
+        return lambda tau: frame_of(c.start + tau) - base
+
     def clip_source(c: Clip, t_from: float, nf: int) -> tuple[str, str]:
         """Video + audio labels for clip `c` from timeline time `t_from`, exactly `nf` frames long.
         Reaches past the clip's in/out points (transition handles); where the source has no footage
-        the first/last frame is held and the audio is silent."""
+        the first/last frame is held and the audio is silent. Applies speed/ramps/reverse/freeze,
+        the clip's (keyframed) transform, grading and audio gain."""
         m = metas[c.mediaId]
+        cd = c.model_dump()
         seg = nf / fps
-        speed = c.speed or 1
-        src = c.inPoint + (t_from - c.start) * speed
-        lead = 0.0
-        if m["type"] != "image":
-            if src < 0:
-                lead, src = -src / speed, 0.0
-            mfps = m.get("fps") or fps
-            last = max(0.0, (m.get("duration") or 0) - 1.5 / mfps)
-            if src > last:  # entirely past the end: start at the last frame and hold it
-                src = last
-        path = str(original_path(m))
-        if m["type"] == "image":
-            idx = g.add_input(["-loop", "1", "-framerate", _f(fps), "-t", _f(seg + 0.1), "-i", path])
-        else:
-            idx = g.add_input(["-ss", _f(src), "-t", _f(max(0.1, (seg - lead) * speed + 0.1)), "-i", path])
-        vin = g.label("v")
-        pre = f"setpts=(PTS-STARTPTS)/{_f(speed)}," if abs(speed - 1) > EPS else "setpts=PTS-STARTPTS,"
+        tau0 = t_from - c.start
+        D = clip_duration(c)
         hdr = TONEMAP + "," if m.get("hdr") else ""
-        g.add(f"[{idx}:v]{hdr}{pre}fps={_f(fps)}[{vin}]")
-        fitted = fit_chain(g, vin, c.fit or default_fit, W, H, bg)
+        audible = m.get("hasAudio") and m["type"] == "video" and not c.muted and not main_muted and c.volume > 0
+        raw, raw_a = LY.source_raw(g, cd, m, str(original_path(m)), tau0, nf, fps, frame_at_fn(c, tau0),
+                                   want_audio=bool(audible), tonemap=hdr)
+        mode = c.fit or default_fit
+        if MO.has_motion(cd):
+            src_w, src_h = int(m.get("width") or W), int(m.get("height") or H)
+            if mode == "blur":
+                sp_a, sp_b = g.label("sa"), g.label("sb")
+                g.add(f"[{raw}]split[{sp_a}][{sp_b}]")
+                back = blur_backdrop(g, sp_a, W, H)
+                raw = sp_b
+            else:
+                back = g.label("bk")
+                g.add(f"color=c={bg}:s={W}x{H}:r={_f(fps)}:d={_f(seg + 0.1)},format=yuv420p,setsar=1[{back}]")
+            lay = LY.motion_layer(g, raw, cd, src_w, src_h, mode == "fill", W, H, tau0, fps, nf, workdir)
+            fitted = g.label("mc")
+            g.add(f"[{back}][{lay}]overlay=0:0:format=auto:shortest=1,format=yuv420p[{fitted}]")
+        else:
+            fitted = fit_chain(g, raw, mode, W, H, bg)
         vout = g.label("cv")
-        pad = f"tpad=start_mode=clone:start_duration={_f(lead)}:stop_mode=clone:stop_duration={_f(seg + 0.1)}"
         if needs_grade(filt(c)):
             pre_g = g.label("pg")
             g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p[{pre_g}]")
-            fitted = grade_chain(g, pre_g, filt(c), W, H, rs=rs, fps=fps, t0=t_from, f0=int(round(t_from * fps)),
-                                 duration=seg, workdir=workdir, cubes=cubes)
-        g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p,{pad},trim=end_frame={nf},setpts=PTS-STARTPTS[{vout}]")
+            if (c.keyframes or {}).get("intensity"):
+                base_a, base_b = g.label("ia"), g.label("ib")
+                g.add(f"[{pre_g}]split[{base_a}][{base_b}]")
+                graded = grade_chain(g, base_a, filt(c), W, H, rs=rs, fps=fps, t0=t_from, f0=int(round(t_from * fps)),
+                                     duration=seg, workdir=workdir, cubes=cubes)
+                fitted = LY.intensity_sendcmd(g, graded, base_b, cd, tau0, nf, fps, workdir)
+            else:
+                fitted = grade_chain(g, pre_g, filt(c), W, H, rs=rs, fps=fps, t0=t_from, f0=int(round(t_from * fps)),
+                                     duration=seg, workdir=workdir, cubes=cubes)
+        g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p,tpad=stop_mode=clone:stop_duration={_f(seg + 0.1)},"
+              f"trim=end_frame={nf},setpts=PTS-STARTPTS[{vout}]")
         aout = g.label("ca")
-        if m.get("hasAudio") and m["type"] == "video" and not c.muted and not main_muted and c.volume > 0:
-            delay = f"adelay={int(round(lead * 1000))}:all=1," if lead > 0 else ""
-            g.add(f"[{idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo{atempo(speed)},"
-                  f"volume={_f(c.volume * main_vol)},{delay}apad=whole_dur={_f(seg)},atrim=duration={_f(seg)},"
-                  f"asetpts=PTS-STARTPTS[{aout}]")
+        if audible and raw_a:
+            g.add(f"[{raw_a}]volume=eval=frame:volume='{LY.gain_expr(cd, D, tau0, main_vol)}',"
+                  f"apad=whole_dur={_f(seg)},atrim=duration={_f(seg)},asetpts=PTS-STARTPTS[{aout}]")
         else:
             g.add(f"anullsrc=r=48000:cl=stereo,atrim=duration={_f(seg)}[{aout}]")
         return vout, aout
@@ -369,8 +392,23 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                 graded = grade_chain(g, gin, filt(c), W, H, rs=rs, fps=fps, t0=r0, f0=int(round(r0 * fps)),
                                      duration=dur, workdir=workdir, cubes=cubes)
                 op = max(0.0, min(1.0, c.transform.opacity))
-                g.add(f"[{keep}][{graded}]blend=all_mode=normal:c0_opacity={_f(1 - op)}:c1_opacity={_f(1 - op)}:"
-                      f"c2_opacity={_f(1 - op)}:enable='between(t,{_f(a_t - r0)},{_f(b_t - r0)})'[{out}]")
+                ikf = (c.keyframes or {}).get("intensity")
+                if ikf:
+                    # Keyframed strength: per-frame blend opacity (blend's first input is the ungraded one).
+                    name = g.label("ai")
+                    cmd = workdir / f"{name}.txt"
+                    ikd = [k.model_dump() if hasattr(k, "model_dump") else k for k in ikf]
+                    cmd.write_text("".join(
+                        f"{_f(n / fps)} blend@{name} all_opacity "
+                        f"{_f(1 - op * max(0.0, min(1.0, MO.value_at(ikd, r0 + n / fps - c.start, 1.0))))};\n"
+                        for n in range(frame_of(a_t), frame_of(b_t))), encoding="utf-8")
+                    gs = g.label("ais")
+                    g.add(f"[{keep}]sendcmd=f={cmd.name}[{gs}]")
+                    g.add(f"[{gs}][{graded}]blend@{name}=all_mode=normal:all_opacity={_f(1 - op)}:"
+                          f"enable='between(t,{_f(a_t - r0)},{_f(b_t - r0)})'[{out}]")
+                else:
+                    g.add(f"[{keep}][{graded}]blend=all_mode=normal:c0_opacity={_f(1 - op)}:c1_opacity={_f(1 - op)}:"
+                          f"c2_opacity={_f(1 - op)}:enable='between(t,{_f(a_t - r0)},{_f(b_t - r0)})'[{out}]")
                 v_base = out
                 continue
             if not c.mediaId or clip_duration(c) <= EPS:
@@ -382,57 +420,56 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
             a_t, b_t = max(c_start, r0), min(c_end, r1)
             if b_t - a_t <= EPS:
                 continue
-            seg = b_t - a_t
-            speed = c.speed or 1
-            src_in = c.inPoint + (a_t - c_start) * speed
-            path = str(original_path(m))
-            if m["type"] == "image":
-                idx = g.add_input(["-loop", "1", "-framerate", _f(fps), "-t", _f(seg + 0.1), "-i", path])
-            else:
-                idx = g.add_input(["-ss", _f(src_in), "-t", _f(seg * speed + 0.05), "-i", path])
-            geo = overlay_geometry(m, c, W, H)
-            offset = a_t - r0
-            ov = g.label("ov")
-            pre = f"setpts=(PTS-STARTPTS)/{_f(speed)}," if abs(speed - 1) > EPS else "setpts=PTS-STARTPTS,"
+            nf = frame_of(b_t) - frame_of(a_t)
+            if nf <= 0:
+                continue
+            seg = nf / fps
+            cd = c.model_dump()
+            tau0 = a_t - c_start
+            offset = frame_of(a_t) / fps
             hdr = TONEMAP + "," if m.get("hdr") else ""
-            chain = [f"[{idx}:v]{hdr}{pre}fps={_f(fps)}", f"scale={geo['sw']}:{geo['sh']}"]
-            if geo["crop"]:
-                chain.append(f"crop={geo['cw']}:{geo['ch']}")
+            audible = m["type"] == "video" and m.get("hasAudio") and not t.muted and not c.muted and c.volume > 0
+            raw, raw_a = LY.source_raw(g, cd, m, str(original_path(m)), tau0, nf, fps, frame_at_fn(c, tau0),
+                                       want_audio=bool(audible), tonemap=hdr)
+            src_w, src_h = int(m.get("width") or W), int(m.get("height") or H)
+            fill = (c.fit or "fit") == "fill"
+            rect = None
             if needs_grade(filt(c)):
-                lw, lh = (geo["cw"], geo["ch"]) if geo["crop"] else (geo["sw"], geo["sh"])
+                # Grade the overlay's own picture at its fitted size (scale 1), like the preview.
+                x0, y0, cw, ch = LY.rounded_rect(src_w, src_h, (c.transform.crop.model_dump()), fill, W, H)
+                f0 = min(W / cw, H / ch)
+                gw, gh = max(2, LY.rnd(cw * f0 / 2) * 2), max(2, LY.rnd(ch * f0 / 2) * 2)
                 pre_g = g.label("og")
-                g.add(",".join(chain) + f",format=yuv420p[{pre_g}]")
-                graded = grade_chain(g, pre_g, filt(c), lw, lh, rs=rs, fps=fps, t0=a_t, f0=int(round(a_t * fps)),
-                                     duration=seg, workdir=workdir, cubes=cubes)
-                chain = [f"[{graded}]null"]
-            chain.append("format=rgba")
-            if c.transform.flipH:
-                chain.append("hflip")
-            if c.transform.flipV:
-                chain.append("vflip")
-            if abs(c.transform.rotation) > EPS:
-                a = f"{_f(c.transform.rotation)}*PI/180"
-                chain.append(f"rotate={a}:ow=rotw({a}):oh=roth({a}):c=none")
-            if c.transform.opacity < 1 - EPS:
-                chain.append(f"colorchannelmixer=aa={_f(max(0.0, c.transform.opacity))}")
-            chain.append(f"trim=duration={_f(seg)},setpts=PTS-STARTPTS+{_f(offset)}/TB[{ov}]")
-            g.add(",".join(chain))
+                g.add(f"[{raw}]format=rgba,crop={cw}:{ch}:{x0}:{y0}:exact=1,scale={gw}:{gh},format=yuv420p[{pre_g}]")
+                raw = grade_chain(g, pre_g, filt(c), gw, gh, rs=rs, fps=fps, t0=a_t, f0=int(round(a_t * fps)),
+                                  duration=seg, workdir=workdir, cubes=cubes)
+                src_w, src_h, rect = gw, gh, (0, 0, gw, gh)
+            lay = LY.motion_layer(g, raw, cd, src_w, src_h, fill, W, H, tau0, fps, nf, workdir, rect=rect)
+            ov = g.label("ov")
+            g.add(f"[{lay}]setpts=PTS-STARTPTS+{_f(offset)}/TB[{ov}]")
             out = g.label("vb")
-            g.add(f"[{v_base}][{ov}]overlay=x=(W-w)/2+({_f(c.transform.x)}):y=(H-h)/2+({_f(c.transform.y)}):"
-                  f"enable='between(t,{_f(offset)},{_f(offset + seg)})':eof_action=pass:format=auto[{out}]")
+            g.add(f"[{v_base}][{ov}]overlay=0:0:enable='between(t,{_f(offset)},{_f(offset + seg)})':"
+                  f"eof_action=pass:format=auto[{out}]")
             v_base = out
             # Overlay video audio is mixed in like an audio-track clip.
-            if m["type"] == "video" and m.get("hasAudio") and not t.muted and not c.muted and c.volume > 0:
+            if audible and raw_a:
                 lbl = g.label("oa")
-                g.add(f"[{idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo{atempo(speed)},"
-                      f"atrim=duration={_f(seg)},asetpts=PTS-STARTPTS,volume={_f(c.volume * t.volume)},"
+                g.add(f"[{raw_a}]volume=eval=frame:volume='{LY.gain_expr(cd, clip_duration(c), tau0, t.volume)}',"
                       f"adelay={int(round(offset * 1000))}:all=1[{lbl}]")
                 extra.append(lbl)
 
-    # Audio + music tracks, positioned with adelay and mixed over the main audio.
+    # Audio + music tracks, positioned with adelay and mixed over the main audio. Music tracks with
+    # auto-duck lower under speech (main-track and audio-track clips with sound).
+    speech = None
     for t in project.tracks:
         if t.type not in ("audio", "music") or t.muted:
             continue
+        duck_cfg = getattr(t, "autoDuck", None) or {}
+        regions = None
+        if t.type == "music" and duck_cfg.get("enabled"):
+            if speech is None:
+                speech = speech_regions(project, metas)
+            regions = speech
         for c in t.clips:
             if not c.mediaId or c.muted or c.volume <= 0 or clip_duration(c) <= EPS:
                 continue
@@ -443,20 +480,17 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
             a_t, b_t = max(c_start, r0), min(c_end, r1)
             if b_t - a_t <= EPS:
                 continue
-            speed = c.speed or 1
-            src_in = c.inPoint + (a_t - c_start) * speed
-            idx = g.add_input(["-ss", _f(src_in), "-t", _f((b_t - a_t) * speed + 0.05), "-i", str(original_path(m))])
+            nf = max(1, frame_of(b_t) - frame_of(a_t))
+            cd = c.model_dump()
+            tau0 = a_t - c_start
+            _, raw_a = LY.source_raw(g, cd, {**m, "type": "video"}, str(original_path(m)), tau0, nf, fps,
+                                     frame_at_fn(c, tau0), want_audio=True, want_video=False) if m["type"] != "image" else (None, None)
+            if not raw_a:
+                continue
             lbl = g.label("ta")
-            delay_ms = int(round((a_t - r0) * 1000))
-            fades = ""
-            if c.fadeIn > 0 and a_t - c_start < c.fadeIn:
-                fades += f",afade=t=in:st=0:d={_f(c.fadeIn - (a_t - c_start))}"
-            if c.fadeOut > 0 and c_end - b_t < c.fadeOut:
-                fo = c.fadeOut - (c_end - b_t)
-                fades += f",afade=t=out:st={_f(max(0.0, (b_t - a_t) - fo))}:d={_f(fo)}"
-            g.add(f"[{idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo{atempo(speed)},"
-                  f"atrim=duration={_f(b_t - a_t)},asetpts=PTS-STARTPTS,volume={_f(c.volume * t.volume)}{fades},"
-                  f"adelay={delay_ms}:all=1[{lbl}]")
+            expr = LY.gain_expr(cd, clip_duration(c), tau0, t.volume, duck=regions,
+                                duck_db=float(duck_cfg.get("amount", -12)), t_abs0=a_t)
+            g.add(f"[{raw_a}]volume=eval=frame:volume='{expr}',adelay={int(round((a_t - r0) * 1000))}:all=1[{lbl}]")
             extra.append(lbl)
 
     if extra:
@@ -490,6 +524,34 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
 
 _names_lock = threading.Lock()
 _reserved: set[str] = set()
+
+
+def speech_regions(project: Project, metas: dict) -> list[tuple[float, float]]:
+    """Timeline regions with speech-like sound (main video and audio tracks), from the waveforms."""
+    import json as _json
+    sources = []
+    for t in project.tracks:
+        if t.muted or t.type not in ("video", "audio"):
+            continue
+        for c in t.clips:
+            m = metas.get(c.mediaId or "")
+            if not m or not m.get("hasAudio") or not m.get("waveform") or c.muted or c.volume <= 0 or m.get("sfx"):
+                continue  # sound effects are not speech
+            try:
+                wf = _json.loads((CACHE_DIR / m["id"] / "waveform.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            pk, pps = wf.get("peaks") or [], wf.get("peaksPerSecond", 100)
+            cd = c.model_dump()
+            D = clip_duration(c)
+            n = int(D * 100)
+            vals = []
+            for i in range(n):
+                src = MO.src_time(cd, i / 100)
+                j = int(src * pps)
+                vals.append((pk[j] / 255) if 0 <= j < len(pk) else 0.0)
+            sources.append((c.start, c.start + D, vals, 0))
+    return MO.duck_regions(sources)
 
 
 def _export_name(project: Project, mode: str) -> Path:

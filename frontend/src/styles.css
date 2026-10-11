@@ -313,3 +313,35 @@ pre.log { background: var(--bg-0); border: 1px solid var(--line); border-radius:
 .scope span { position: absolute; left: 4px; top: 2px; font-size: 9px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
 .scope-stats { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-3); }
 .scope-stats .warn { color: var(--warn); }
+
+/* ---------- motion, keyframes, speed (Phase 5) ---------- */
+.mo { gap: 5px; }
+.mo-row { display: grid; grid-template-columns: 52px 1fr 52px auto; gap: 6px; align-items: center; font-size: 12px; }
+.mo-row label { color: var(--text-2); cursor: default; }
+.mo-row input[type=range] { width: 100%; }
+.mo-row .mono { font-size: 11px; text-align: right; }
+.kf-ctl { display: inline-flex; align-items: center; gap: 0; }
+.kf-jump { background: none; border: 0; color: var(--text-3); font-size: 8px; padding: 0 2px; cursor: pointer; }
+.kf-jump:disabled { opacity: 0.25; cursor: default; }
+.kf-jump:not(:disabled):hover { color: var(--text); }
+.kf-diamond { background: none; border: 0; padding: 0 2px; font-size: 13px; line-height: 1; cursor: pointer; color: transparent; -webkit-text-stroke: 1px var(--text-3); }
+.kf-diamond.some { -webkit-text-stroke: 1px var(--accent-2); }
+.kf-diamond.on { color: var(--accent-2); -webkit-text-stroke: 1px var(--accent-2); }
+.kf-diamond:hover { -webkit-text-stroke: 1px var(--text); }
+.ramp-ed { width: 100%; height: 90px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; touch-action: none; }
+.ramp-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ramp-one { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.ramp-lbl { fill: var(--text-3); font-size: 8px; }
+.ramp-line { fill: none; stroke: var(--accent-2); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ramp-pt { fill: #fff; stroke: var(--accent); stroke-width: 2; cursor: grab; vector-effect: non-scaling-stroke; }
+.sel-swatch { width: 22px; height: 22px; border-radius: 11px; border: 1px solid var(--line-strong); display: inline-block; }
+.sel-hue input[type=range] { -webkit-appearance: none; appearance: none; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, hsl(0 85% 50%), hsl(60 85% 50%), hsl(120 85% 50%), hsl(180 85% 50%), hsl(240 85% 50%), hsl(300 85% 50%), hsl(360 85% 50%)); }
+.tl-kf { position: absolute; bottom: 2px; width: 9px; height: 9px; margin-left: -4.5px; transform: rotate(45deg); background: #fff; border: 1px solid rgba(0,0,0,0.6); z-index: 2; cursor: ew-resize; touch-action: none; }
+.tl-kf:hover, .tl-kf.on { background: var(--accent-2); }
+.pv-handles { position: absolute; left: 0; top: 0; z-index: 3; pointer-events: none; }
+.pv-poly { fill: transparent; stroke: rgba(255,255,255,0.9); stroke-width: 1; pointer-events: all; cursor: move; filter: drop-shadow(0 0 1px rgba(0,0,0,0.9)); }
+.pv-stem { stroke: rgba(255,255,255,0.9); stroke-width: 1; }
+.pv-corner-r { fill: #fff; stroke: #333; stroke-width: 1; pointer-events: all; }
+.pv-knob { fill: var(--accent-2); stroke: #fff; stroke-width: 1.5; pointer-events: all; cursor: grab; }
+.pv-pick { position: absolute; inset: 0; z-index: 5; cursor: crosshair; }

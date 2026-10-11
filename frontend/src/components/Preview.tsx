@@ -5,6 +5,7 @@ import { useEditor } from "../store/editor";
 import type { MediaMeta } from "../types";
 import { fmtTime, projectDuration } from "../util";
 import { Icon } from "./Icons";
+import TransformHandles from "./TransformHandles";
 
 /** URL the browser should play for a media item: proxy when ready, else the original. */
 export function playableUrl(m: MediaMeta): string {
@@ -86,6 +87,20 @@ function ProgramMonitor() {
   const [safe, setSafe] = useState(() => readFlag("ligxt.safeAreas", false));
   const [scopes, setScopes] = useState(() => readFlag("ligxt.scopes", false));
   const compare = useEditor((s) => s.compare);
+  const colorPick = useEditor((s) => s.colorPick);
+  const pick = (e: React.MouseEvent) => {
+    const cv = canvasRef.current;
+    const fn = useEditor.getState().colorPick;
+    if (!cv || !fn) return;
+    const r = cv.getBoundingClientRect();
+    const x = Math.floor(((e.clientX - r.left) / r.width) * cv.width), y = Math.floor(((e.clientY - r.top) / r.height) * cv.height);
+    // Average a 5x5 patch so noise or grain doesn't decide the colour.
+    const d = cv.getContext("2d")!.getImageData(Math.max(0, x - 2), Math.max(0, y - 2), 5, 5).data;
+    const rgb: [number, number, number] = [0, 0, 0];
+    for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) rgb[c] += d[i + c] / (d.length / 4);
+    useEditor.getState().setColorPick(null);
+    fn(rgb);
+  };
   const toggleScopes = () => {
     setScopes(!scopes);
     writeFlag("ligxt.scopes", !scopes);
@@ -157,6 +172,8 @@ function ProgramMonitor() {
             {buffering && <span className="preview-label" style={{ top: 8, left: 8 }}>Loading…</span>}
             {shuttleLabel && <span className="shuttle-badge">{shuttleLabel}</span>}
             {compare != null && <CompareDivider value={compare} width={fw} />}
+            {compare == null && !colorPick && <TransformHandles fw={fw} fh={fh} />}
+            {colorPick && <div className="pv-pick" title="Click a colour to keep" onClick={pick} />}
           </div>
         )}
       </div>

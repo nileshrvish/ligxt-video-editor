@@ -39,6 +39,7 @@ Stop it with **Ctrl+C** in the PowerShell window.
 | `projects\`  | `projects\<id>\project.json` and `autosave\` (last 10 autosaves, every 30 s) |
 | `exports\`   | Rendered videos |
 | `templates\` | Style templates (Phase 7) |
+| `sfx\`       | Bundled sound effects (whoosh, fast whoosh, hit, riser), synthesised, CC0 |
 
 ## Keyboard shortcuts
 
@@ -80,6 +81,15 @@ Colour & effects: select a clip and open **Colour & effects** in Properties.
 
 Timeline mouse: drag a clip to move it (or to another track of the same kind), drag its edges to trim, drag a marker flag to move it, double-click a track name to rename it. The main video track is magnetic by default (no gaps; dragging reorders). Turn that off with the **Magnetic** button.
 
+## Motion, speed and audio
+
+- **Transform**: select a clip and drag it in the preview (move; corners scale; the round knob rotates, Shift = 15° steps), or use Properties > Transform (position, scale, rotation, opacity, flips, crop).
+- **Keyframes**: the ◆ next to a property adds or removes a keyframe at the playhead; once a property has keyframes, every change at another time adds one. ◀ ▶ jump between keyframes. Pick the easing (linear, ease in, ease out, ease in-out, punch) for the move that starts at a keyframe. Keyframes show as diamonds on the clip in the timeline: click to jump, drag to retime.
+- **Motion presets**: zoom in/out (Ken Burns), pan ←→↑↓, punch-in at the playhead, camera shake (amount, duration). Punches and shake layer on top of a zoom or pan.
+- **Speed**: 0.25-4x (pitch preserved), speed ramps (presets + a curve you can drag; double-click adds/removes points), reverse, freeze frame.
+- **Audio**: volume keyframes, fade in/out on any clip, Detach audio, auto-duck (the `duck` button on a music track lowers it under speech), `+ SFX` adds a sound effect whose peak lands on the playhead or a whoosh on every transition.
+- **Selective colour** (Colour & effects): keep one colour (hue, range, softness, or pick it from the preview) and turn the rest black and white.
+
 ## Export settings
 
 - **Final**: libx264, CRF 18, preset slow, yuv420p, AAC 192 kbps stereo at 48 kHz, `+faststart`
@@ -106,6 +116,8 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 ## Bundled LUTs and licenses
 
 `luts\` holds four example LUTs (Teal & Orange, Bleach Bypass, Matte Fade, Sunset Warm). They were generated for this project by `scripts\make_luts.py` from simple colour formulas, contain no third-party material, and are released under **CC0 1.0** (public domain, see `luts\LICENSE.md`). LUTs you import are stored in `user_luts` and keep their own licenses.
+
+`sfx\` holds sound effects synthesised from noise and sine waves by `scripts\make_sfx.py`; no recordings or samples are used, and they are released under **CC0 1.0** (see `sfx\LICENSE.md`).
 
 ## Troubleshooting
 

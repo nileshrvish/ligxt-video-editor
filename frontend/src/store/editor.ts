@@ -5,6 +5,8 @@ import * as ops from "../timeline/ops";
 import { cuts as cutPairs } from "../timeline/transitions";
 import { clipEnd, newClip, projectDuration as projectDurationOf, trackEnd, uid } from "../util";
 import { toastError, useApp } from "./app";
+import * as E from "../motion/edit";
+import { srcTime } from "../motion/motion";
 
 export type Selection =
   | { kind: "none" }
@@ -72,6 +74,16 @@ interface EditorState {
   setCompare: (v: number | null) => void;
   /** Copied filter stack (copy/paste between clips). */
   filterClipboard: Filter[] | null;
+  /** Eyedropper: while set, a click on the preview reports the pixel colour here. */
+  colorPick: ((rgb: [number, number, number]) => void) | null;
+  setColorPick: (fn: ((rgb: [number, number, number]) => void) | null) => void;
+  /** Add a bundled sound effect with its peak on each of `times` (imports it once). */
+  addSfx: (sfxId: string, times: number[], volume?: number) => Promise<number>;
+  /** Whooshes on every main-track transition (hits on fades to/from white/black are left out). */
+  whooshTransitions: () => Promise<number>;
+  detachAudio: (clipId: string) => void;
+  /** Split the selected main-track clip at the playhead and hold that frame for `seconds`. */
+  freezeFrameAtPlayhead: (seconds?: number) => void;
   copyFilters: (clipId: string) => void;
   pasteFilters: (clipIds: string[]) => void;
   /** Replace a clip's filters. `undoable=false` while dragging a slider (wrap in begin/endGesture). */
@@ -108,6 +120,71 @@ export const useEditor = create<EditorState>((set, get) => ({
   lastTransition: { type: "fade", duration: 0.5 },
   compare: null,
   filterClipboard: null,
+  colorPick: null,
+  setColorPick: (colorPick) => set({ colorPick }),
+
+  addSfx: async (sfxId, times, volume = 0.35) => {
+    if (!get().project || !times.length) return 0;
+    try {
+      // Reuse an already imported copy of this effect.
+      let m = Object.values(get().media).find((x) => x.sfx === sfxId && x.status !== "error");
+      if (!m) {
+        m = (await api.importSfx(sfxId)).media;
+        set({ media: { ...get().media, [m.id]: m } });
+      }
+      const mm = m;
+      get().commit((d) => {
+        for (const t of times) E.placeSfx(d, mm, t, volume);
+      });
+      return times.length;
+    } catch (e) {
+      toastError("Could not add the sound effect", e);
+      return 0;
+    }
+  },
+
+  whooshTransitions: async () => {
+    const p = get().project;
+    if (!p) return 0;
+    const main = p.tracks.find((t) => t.type === "video");
+    const times: number[] = [];
+    for (const tr of p.transitions) {
+      if (tr.trackId !== main?.id || /fade|dissolve/.test(tr.type)) continue;
+      const a = main.clips.find((c) => c.id === tr.fromClipId);
+      if (a) times.push(clipEnd(a));
+    }
+    return get().addSfx("whoosh", times, 0.3);
+  },
+
+  detachAudio: (clipId) => {
+    let id: string | null = null;
+    get().commit((d) => void (id = E.detachAudio(d, clipId)));
+    if (id) useApp.getState().toast({ kind: "success", title: "Audio detached", detail: "The sound is now its own clip on an audio track; the video clip is muted." });
+  },
+
+  freezeFrameAtPlayhead: (seconds = 1) => {
+    const { project, playhead, selection } = get();
+    if (!project || selection.kind !== "clip") return;
+    const hit = ops.findClip(project, selection.clipId);
+    if (!hit || hit.track.type !== "video" || playhead <= hit.clip.start + 0.05 || playhead >= clipEnd(hit.clip) - 0.05) {
+      useApp.getState().toast({ kind: "info", title: "Put the playhead inside the selected main-track clip first" });
+      return;
+    }
+    const src = srcTime(hit.clip, playhead - hit.clip.start).src;
+    get().commit((d) => {
+      const rightId = ops.splitClip(d, selection.clipId, playhead);
+      const t = d.tracks.find((x) => x.id === hit.track.id)!;
+      const base = t.clips.find((c) => c.id === selection.clipId)!;
+      const freeze: Clip = {
+        ...structuredClone(base), id: uid(), start: playhead, inPoint: Math.max(0, src - seconds), outPoint: Math.max(seconds, src),
+        speed: 1, speedRamp: null, reverse: false, freezeFrame: src, keyframes: {}, muted: true,
+      };
+      const idx = t.clips.findIndex((c) => c.id === rightId);
+      t.clips.splice(idx < 0 ? t.clips.length : idx, 0, freeze);
+      ops.pack(t, false);
+      set({ selection: { kind: "clip", clipId: freeze.id } });
+    });
+  },
 
   load: async (id) => {
     const project = await api.getProject(id);

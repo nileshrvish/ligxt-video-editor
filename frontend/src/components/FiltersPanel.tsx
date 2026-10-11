@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { PRESET_ORDER, PRESETS, type EffectKey } from "../grade/math";
 import {
-  ADJUST_UI, adjustOf, EFFECT_UI, effectOf, lutOf, presetOf, setAdjust, setEffect, setLut, setPreset, withNewIds,
+  ADJUST_UI, adjustOf, EFFECT_UI, effectOf, lutOf, presetOf, selectiveOf, setAdjust, setEffect, setLut, setPreset,
+  setSelective, withNewIds,
 } from "../grade/stack";
+import { hueSat } from "../grade/math";
 import { toastError, useApp } from "../store/app";
 import { useEditor } from "../store/editor";
 import type { Clip, Filter } from "../types";
@@ -39,7 +41,8 @@ export default function FiltersPanel({ clip, trackId }: { clip: Clip; trackId: s
   const clipboard = useEditor((s) => s.filterClipboard);
   const [luts, setLuts] = useState<Lut[]>([]);
   const [mine, setMine] = useState<UserPreset[]>([]);
-  const [open, setOpen] = useState<Record<string, boolean>>({ presets: true, adjust: false, effects: false, lut: false });
+  const [open, setOpen] = useState<Record<string, boolean>>({ presets: true, adjust: false, effects: false, lut: false, selective: false });
+  const picking = useEditor((s) => !!s.colorPick);
   const [saving, setSaving] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -53,6 +56,19 @@ export default function FiltersPanel({ clip, trackId }: { clip: Clip; trackId: s
   const adj = adjustOf(filters);
   const preset = presetOf(filters);
   const lut = lutOf(filters);
+  const sel = selectiveOf(filters);
+  const sp = (sel?.params ?? {}) as Record<string, number>;
+  const pickHue = () =>
+    st().setColorPick(picking ? null : (rgb) => {
+      const [h, s] = hueSat([rgb[0] / 255, rgb[1] / 255, rgb[2] / 255]);
+      if (s < 0.08) {
+        toast({ kind: "info", title: "That pixel is almost grey", detail: "Click on a clearly coloured area." });
+        return;
+      }
+      // The clip may have changed since the button was pressed: edit its current filters.
+      const now = st().project!.tracks.flatMap((t) => t.clips).find((c) => c.id === clip.id)?.filters ?? filters;
+      set(setSelective(now, { hue: Math.round(h) }));
+    });
   const count = filters.length;
 
   const applyToAll = () => {
@@ -183,6 +199,41 @@ export default function FiltersPanel({ clip, trackId }: { clip: Clip; trackId: s
               ))}
             </div>
           ))}
+        </div>
+      )}
+
+      {section("selective", "Selective colour", sel ? "on" : undefined)}
+      {open.selective && (
+        <div className="fl-body">
+          <label className="row fl-check">
+            <input type="checkbox" checked={!!sel} onChange={(e) => set(setSelective(filters, e.target.checked ? {} : null))} />
+            Keep one colour, the rest black & white
+          </label>
+          {sel && (
+            <>
+              <div className="row" style={{ gap: 6 }}>
+                <span className="sel-swatch" style={{ background: `hsl(${sp.hue ?? 25} 85% 50%)` }} />
+                <button className={`btn sm ${picking ? "toggle on" : ""}`} onClick={pickHue} title="Click a colour in the preview to keep it">
+                  {picking ? "Click the preview…" : "Pick from preview"}
+                </button>
+              </div>
+              <div className="fl-row sel-hue">
+                <label>Hue</label>
+                <input type="range" min={0} max={359} step={1} value={sp.hue ?? 25}
+                  onPointerDown={() => st().beginGesture()} onPointerUp={() => st().endGesture()}
+                  onChange={(e) => set(setSelective(filters, { hue: +e.target.value }), false)} />
+                <span className="mono faint">{Math.round(sp.hue ?? 25)}°</span>
+              </div>
+              <Slider label="Range" value={sp.range ?? 20} min={2} max={90} step={1} fmt={(v) => `±${Math.round(v)}°`}
+                onChange={(v, fin) => set(setSelective(filters, { range: v }), fin)} />
+              <Slider label="Softness" value={sp.softness ?? 12} min={1} max={60} step={1} fmt={(v) => `${Math.round(v)}°`}
+                onChange={(v, fin) => set(setSelective(filters, { softness: v }), fin)} />
+              <Slider label="Ignore greys" value={sp.satLow ?? 0.08} min={0} max={0.6} step={0.01} fmt={(v) => `${Math.round(v * 100)}%`}
+                onChange={(v, fin) => set(setSelective(filters, { satLow: v, satHigh: Math.max(v + 0.05, sp.satHigh ?? 0.2) }), fin)} />
+              <Slider label="Intensity" value={sel.intensity} min={0} max={1} step={0.01} fmt={(v) => `${Math.round(v * 100)}%`}
+                onChange={(v, fin) => set(setSelective(filters, {}, { intensity: v }), fin)} />
+            </>
+          )}
         </div>
       )}
 
