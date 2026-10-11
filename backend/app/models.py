@@ -112,6 +112,7 @@ class Track(Base):
     hidden: bool = False
     locked: bool = False
     volume: float = 1
+    magnetic: Optional[bool] = None  # main video track: clips stay packed (default on)
     clips: list[Clip] = Field(default_factory=list)
 
 

@@ -32,6 +32,12 @@ const paths: Record<string, string> = {
   fullscreen: "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5",
   sparkles: "M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2zM19 15l1 2 2 1-2 1-1 2-1-2-2-1 2-1z",
   text: "M5 6V4h14v2M12 4v16M9 20h6",
+  scissors: "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12",
+  flag: "M5 21V4M5 4h11l-2 4 2 4H5",
+  magnet: "M6 3v8a6 6 0 0 0 12 0V3h-4v8a2 2 0 0 1-4 0V3zM6 7h4M14 7h4",
+  link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
+  lock: "M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4",
+  unlock: "M6 11h12v10H6zM8 11V7a4 4 0 0 1 7.5-2",
 };
 
 export function Icon({ name, size = 16, className, style }: { name: keyof typeof paths | string; size?: number; className?: string; style?: React.CSSProperties }) {

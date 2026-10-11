@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { toastError, useApp } from "../store/app";
 import { useEditor, useSelectedClip } from "../store/editor";
+import * as ops from "../timeline/ops";
 import type { Aspect, Clip, FitMode, MediaMeta } from "../types";
 import { ASPECTS, clipDuration, fmtBytes, fmtDuration } from "../util";
 import { Icon } from "./Icons";
@@ -14,7 +15,9 @@ export default function Properties() {
     <div className="panel">
       <div className="panel-head">Properties</div>
       <div className="panel-body">
-        {selClip ? (
+        {sel.kind === "marker" ? (
+          <MarkerProps id={sel.id} />
+        ) : selClip ? (
           <ClipProps clip={selClip.clip} trackId={selClip.trackId} trackType={selClip.trackType} />
         ) : sel.kind === "media" && media[sel.id] ? (
           <MediaProps m={media[sel.id]} />
@@ -60,10 +63,14 @@ function NumberField({
 
 function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; trackType: string }) {
   const m = useEditor((s) => (clip.mediaId ? s.media[clip.mediaId] : undefined));
+  const locked = useEditor((s) => !!s.project!.tracks.find((t) => t.id === trackId)?.locked);
   const update = (fn: (c: Clip) => void) =>
     useEditor.getState().commit((p) => {
       const c = p.tracks.find((t) => t.id === trackId)?.clips.find((c) => c.id === clip.id);
-      if (c) fn(c);
+      if (!c) return;
+      fn(c);
+      // Typed values follow the same rules as dragging (no overlaps, magnetic packing).
+      ops.settle(p, c.id);
     });
   const maxOut = m && m.type !== "image" ? m.duration : 3600;
   const isVisual = trackType === "video" || trackType === "overlay";
@@ -76,13 +83,19 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
         <div className="faint" style={{ fontSize: 12 }}>
           {fmtDuration(clipDuration(clip))} on timeline
         </div>
+        {locked && <div style={{ color: "var(--warn)", fontSize: 12 }}>This track is locked. Unlock it to edit.</div>}
       </div>
 
       <div className="prop-group">
         <div className="label">Timing</div>
         <div className="prop-row">
           <label>Start at</label>
-          <NumberField value={clip.start} min={0} suffix="s" onCommit={(v) => update((c) => void (c.start = v))} />
+          <NumberField
+            value={clip.start}
+            min={0}
+            suffix="s"
+            onCommit={(v) => useEditor.getState().commit((p) => ops.moveClip(p, clip.id, v))}
+          />
         </div>
         <div className="prop-row">
           <label>In point</label>
@@ -165,6 +178,58 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
           <Icon name="trash" size={14} /> Delete clip
         </button>
         <div className="faint" style={{ fontSize: 11 }}>Crop, keyframes, speed, filters and transitions arrive in later phases.</div>
+      </div>
+    </div>
+  );
+}
+
+function MarkerProps({ id }: { id: string }) {
+  const marker = useEditor((s) => s.project!.markers.find((m) => m.id === id));
+  const commit = useEditor((s) => s.commit);
+  if (!marker) return null;
+  const COLORS = ["#f5c542", "#ff5c8a", "#3ccf91", "#4ab3ff", "#a597ff"];
+  return (
+    <div className="props">
+      <div>
+        <div className="label">Marker</div>
+        <h3>{marker.label || "Untitled marker"}</h3>
+      </div>
+      <div className="prop-group">
+        <div className="prop-row">
+          <label>Label</label>
+          <input
+            className="input"
+            defaultValue={marker.label}
+            key={marker.id}
+            placeholder="e.g. Drop, Beat 1"
+            onBlur={(e) => e.target.value !== marker.label && commit((p) => void (p.markers.find((m) => m.id === id)!.label = e.target.value))}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          />
+        </div>
+        <div className="prop-row">
+          <label>Time</label>
+          <NumberField value={marker.time} min={0} suffix="s" onCommit={(v) => commit((p) => ops.moveMarker(p, id, v))} />
+        </div>
+        <div className="prop-row">
+          <label>Color</label>
+          <div className="row" style={{ gap: 6 }}>
+            {COLORS.map((c) => (
+              <button
+                key={c}
+                title={c}
+                onClick={() => commit((p) => void (p.markers.find((m) => m.id === id)!.color = c))}
+                style={{ width: 20, height: 20, borderRadius: 10, background: c, border: marker.color === c ? "2px solid #fff" : "1px solid var(--line-strong)", cursor: "pointer" }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="prop-group">
+        <button className="btn" onClick={() => useEditor.getState().setPlayhead(marker.time)}>Go to marker</button>
+        <button className="btn danger" onClick={() => useEditor.getState().deleteSelectedClip()}>
+          <Icon name="trash" size={14} /> Delete marker
+        </button>
+        <div className="faint" style={{ fontSize: 11 }}>Clip edges snap to markers while you drag.</div>
       </div>
     </div>
   );

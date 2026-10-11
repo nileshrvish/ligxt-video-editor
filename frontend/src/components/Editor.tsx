@@ -119,8 +119,21 @@ export default function Editor({ projectId }: { projectId: string }) {
         s.setPlayhead(0);
       } else if (k === "End" && s.project) {
         s.setPlayhead(projectDuration(s.project));
+      } else if (ctrl && k.toLowerCase() === "d") {
+        e.preventDefault();
+        s.duplicateSelected();
+      } else if (ctrl) {
+        return;
       } else if (k === "Delete" || k === "Backspace") {
-        s.deleteSelectedClip();
+        e.preventDefault();
+        s.deleteSelectedClip(e.shiftKey);
+      } else if (k.toLowerCase() === "s") {
+        s.splitAtPlayhead();
+      } else if (k.toLowerCase() === "m") {
+        s.addMarkerAtPlayhead();
+      } else if (k.toLowerCase() === "n") {
+        s.setSnapping(!s.snapping);
+        useApp.getState().toast({ kind: "info", title: `Snapping ${!s.snapping ? "on" : "off"}` });
       } else if (k === "?" || (k === "/" && e.shiftKey)) {
         setShowHelp((v) => !v);
       } else if (k === "=" || k === "+") {
@@ -152,8 +165,8 @@ export default function Editor({ projectId }: { projectId: string }) {
     <div className="editor">
       <TopBar onExport={() => setShowExport(true)} onHelp={() => setShowHelp(true)} />
       <div className="workspace">
-        <PanelGroup direction="vertical" autoSaveId="ligxt-v">
-          <Panel defaultSize={64} minSize={30}>
+        <PanelGroup direction="vertical" autoSaveId="ligxt-v2">
+          <Panel defaultSize={60} minSize={30}>
             <PanelGroup direction="horizontal" autoSaveId="ligxt-h">
               <Panel defaultSize={22} minSize={14} maxSize={40}>
                 <MediaLibrary />
@@ -169,7 +182,7 @@ export default function Editor({ projectId }: { projectId: string }) {
             </PanelGroup>
           </Panel>
           <PanelResizeHandle className="resize-v" />
-          <Panel defaultSize={36} minSize={18}>
+          <Panel defaultSize={40} minSize={18}>
             <Timeline />
           </Panel>
         </PanelGroup>
@@ -270,7 +283,14 @@ const SHORTCUTS: [string, string, boolean?][] = [
   ["← / →", "Step one frame"],
   ["Shift + ← / →", "Step one second"],
   ["Home / End", "Go to start / end"],
-  ["Delete", "Delete selected clip"],
+  ["Delete", "Delete selected clip or marker"],
+  ["Shift + Delete", "Ripple delete (close the gap)"],
+  ["S", "Split at playhead"],
+  ["Ctrl + D", "Duplicate clip"],
+  ["M", "Add marker"],
+  ["N", "Snapping on / off"],
+  ["Alt + drag", "Invert snapping while dragging"],
+  ["Double-click track name", "Rename track"],
   ["Ctrl + Z", "Undo"],
   ["Ctrl + Y", "Redo"],
   ["Ctrl + S", "Save"],
@@ -279,9 +299,7 @@ const SHORTCUTS: [string, string, boolean?][] = [
   ["Ctrl + scroll", "Zoom timeline"],
   ["Esc", "Clear selection"],
   ["?", "This help"],
-  ["S", "Split at playhead", true],
   ["J / K / L", "Shuttle", true],
-  ["M", "Add marker", true],
 ];
 
 export function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
@@ -290,7 +308,7 @@ export function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
       <div className="shortcut-list">
         {SHORTCUTS.map(([k, d, soon]) => (
           <div key={k} className={soon ? "soon" : ""}>
-            <span>{d}{soon ? " (Phase 2)" : ""}</span>
+            <span>{d}{soon ? " (Phase 2b)" : ""}</span>
             <span className="kbd">{k}</span>
           </div>
         ))}

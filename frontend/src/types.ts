@@ -42,6 +42,7 @@ export interface Clip {
 export interface Track {
   id: string; type: TrackType; name: string;
   muted: boolean; hidden: boolean; locked: boolean; volume: number;
+  magnetic?: boolean; // main video track only (default true)
   clips: Clip[];
 }
 

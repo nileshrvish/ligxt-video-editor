@@ -50,13 +50,20 @@ Press **?** in the editor to see this list.
 | ← / → | Step one frame |
 | Shift + ← / → | Step one second |
 | Home / End | Go to start / end |
-| Delete | Delete selected clip |
+| Delete | Delete selected clip or marker |
+| Shift + Delete | Ripple delete (close the gap) |
+| S | Split at playhead (selected clip, or every clip under the playhead) |
+| Ctrl + D | Duplicate clip |
+| M | Add marker at playhead |
+| N | Snapping on/off (hold Alt while dragging to invert) |
 | Ctrl + Z / Ctrl + Y | Undo / redo |
 | Ctrl + S | Save |
 | Ctrl + E | Export |
 | + / − or Ctrl + scroll | Zoom the timeline |
 | Esc | Clear selection |
-| S, J/K/L, M | Split, shuttle, marker (Phase 2) |
+| J / K / L | Shuttle (Phase 2b) |
+
+Timeline mouse: drag a clip to move it (or to another track of the same kind), drag its edges to trim, drag a marker flag to move it, double-click a track name to rename it. The main video track is magnetic by default (no gaps; dragging reorders). Turn that off with the **Magnetic** button.
 
 ## Export settings
 
@@ -70,6 +77,9 @@ Press **?** in the editor to see this list.
 ```powershell
 # backend tests (use a temporary data folder, never your real projects)
 cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests
+
+# frontend unit tests (timeline editing logic)
+cd frontend; npm test
 
 # UI with hot reload: run the backend, then the Vite dev server on :5173
 .\start.ps1 -NoBrowser

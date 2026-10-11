@@ -7,7 +7,8 @@ Read this first at the start of every session.
 | Phase | Scope | State |
 |-------|-------|-------|
 | 1 | Backend, project format, media import + proxies, single-clip export | **Done** (2026-10-11) |
-| 2 | Timeline editing (trim, split, reorder, ripple, snapping, markers, beats) + canvas preview player (J/K/L, safe areas) | Next |
+| 2a | Timeline editing: move/reorder, trim, split, ripple delete, duplicate, snapping, markers, add/remove tracks, overlap prevention, one undo per drag | **Done** (2026-10-11) |
+| 2b | Canvas preview player (J/K/L, scrubbing, safe areas), audible music/audio in preview, overlay compositing (preview + export), beat detection | Next |
 | 3 | Transitions (xfade + whip pan) | |
 | 4 | Filters & color (ffmpeg + WebGL preview), LUTs | |
 | 5 | Clip editing (crop, keyframes, speed, reverse, freeze, aspect) + audio (fades, detach, ducking) | |
@@ -27,19 +28,29 @@ Read this first at the start of every session.
 - Frontend (`frontend/src`): zustand stores (`store/editor.ts` has commit/undo/redo/gesture grouping; `store/app.ts` has toasts, jobs, SSE), Home (new project with aspect choice, recent projects, duplicate/delete), Editor with resizable panels (media library, program/source preview, properties, timeline), export dialog with progress/ETA/cancel/result, shortcut overlay, autosave every 30 s, unsaved-changes guard.
 - Tests: `backend/tests/test_phase1.py` (9 tests, about 14 s). Browser-tested at 1366×768: import via drop, add clips, playback across clips, Delete + Ctrl+Z, export (17 s reel rendered in 4.5 s, sync OK, frames verified).
 
+## Phase 2a: what exists
+
+- `frontend/src/timeline/ops.ts` holds every timeline edit as a pure function on a draft Project (move, trim start/end, split, splitAll, delete/ripple, duplicate, settle, add/remove track, markers, snap). `ops.test.ts` has 22 vitest tests (`cd frontend; npm test`).
+- Main video track is **magnetic** by default (`track.magnetic`, toggle in the toolbar): clips stay packed, dragging reorders, trims and deletes ripple. Other tracks: free placement, never overlapping (nearest free slot). Clips move between compatible tracks (video and overlay; audio and music). Locked tracks reject edits.
+- Drags use `beginGesture` → `fromBase(fn)` (recompute from the drag's start snapshot) → `endGesture`, so each drag is one undo step. The drag helper listens on `window` because a clip moved to another track is re-mounted (pointer capture would lose `pointerup`).
+- Snapping (N, Alt inverts while dragging): clip edges on all tracks, playhead, markers, 0; 8 px threshold, with a yellow snap line.
+- Markers: M adds one at the playhead; drag the flag on the ruler; edit label/time/color in Properties; Delete removes it.
+- Selection is `{kind: "clip", clipId}` (the track is looked up), plus `{kind: "marker", id}`.
+- Timeline fits 5 tracks at 1366×768 (38 px rows, timeline 40% by default).
+
 ## Decisions
 
 - Project length = end of the main video track (music running longer is cut). `util.projectDuration` and `render.build_plan` agree on this.
-- Overlapping clips on the main track: the earlier clip wins (Phase 2 should prevent overlaps in the UI).
+- Overlaps are prevented in the UI (ops). The renderer still tolerates them (the earlier clip wins) for hand-edited JSON.
 - Output is forced to TV range (`scale=out_range=tv`, `-color_range tv`) so JPEG inputs don't produce yuvj420p.
 - Preview is currently an HTML `<video>` over proxies (CSS object-fit for fit/fill, blurred thumbnail for blur). Phase 2 replaces it with a canvas/WebGL player.
 
-## Next (Phase 2)
+## Next (Phase 2b)
 
-- Timeline: drag to move/reorder, trim edges, split (S), ripple delete, duplicate, snapping (clip edges, playhead, markers), markers (M), beat detection on the music track, add/remove tracks, overlap handling.
-- Use `beginGesture/endGesture` for drags so each drag is one undo step.
-- Canvas preview player: J/K/L shuttle, scrubbing, Reels safe-area guides, music/audio tracks audible in preview (WebAudio), overlay track compositing.
-- Renderer: overlay track (`overlay` filter with `enable=`), reverse/freeze.
+- Canvas preview player: J/K/L shuttle, scrubbing with frame updates, Reels safe-area guides, fullscreen.
+- Music and audio tracks audible in the preview (WebAudio or synced media elements).
+- Overlay track compositing in the preview and the export (`overlay` filter with `enable=`/timestamp offset; respects hidden tracks and track order).
+- Beat detection on the music track (backend: onset/tempo from the audio, so cuts and markers can snap to beats).
 
 ## Known issues / notes
 

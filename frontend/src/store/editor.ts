@@ -1,13 +1,15 @@
 import { create } from "zustand";
 import { api, uploadMedia } from "../api";
 import type { Clip, MediaMeta, Project, TrackType } from "../types";
+import * as ops from "../timeline/ops";
 import { clipEnd, newClip, trackEnd } from "../util";
 import { toastError, useApp } from "./app";
 
 export type Selection =
   | { kind: "none" }
   | { kind: "media"; id: string }
-  | { kind: "clip"; trackId: string; clipId: string };
+  | { kind: "clip"; clipId: string }
+  | { kind: "marker"; id: string };
 
 export interface Upload {
   key: string;
@@ -50,8 +52,17 @@ interface EditorState {
   importFiles: (files: File[]) => Promise<void>;
   refreshMedia: (id: string) => Promise<void>;
   removeMedia: (id: string) => void;
-  addToTimeline: (mediaId: string, trackType?: TrackType, at?: number) => void;
-  deleteSelectedClip: () => void;
+  /** Add media to a track (default: main video, or music for audio files) at `at` (default: end). */
+  addToTimeline: (mediaId: string, trackId?: string, at?: number) => void;
+  deleteSelectedClip: (ripple?: boolean) => void;
+  splitAtPlayhead: () => void;
+  duplicateSelected: () => void;
+  addMarkerAtPlayhead: () => void;
+  snapping: boolean;
+  setSnapping: (on: boolean) => void;
+  /** During a gesture: replace the project with fn(copy of the gesture's starting state). */
+  fromBase: (fn: (draft: Project) => void) => void;
+  mediaDuration: ops.MediaDuration;
   save: (kind?: "manual" | "auto") => Promise<boolean>;
 }
 
@@ -70,6 +81,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   past: [],
   future: [],
   gestureStart: null,
+  snapping: readSnapping(),
 
   load: async (id) => {
     const project = await api.getProject(id);
@@ -187,40 +199,89 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (used) useApp.getState().toast({ kind: "info", title: "Removed media and its clips", detail: "Ctrl+Z to undo." });
   },
 
-  addToTimeline: (mediaId, trackType, at) => {
+  addToTimeline: (mediaId, trackId, at) => {
     const m = get().media[mediaId];
     const p = get().project;
     if (!m || !p) return;
-    const type: TrackType = trackType ?? (m.type === "audio" ? "music" : "video");
-    if (type === "video" && m.type === "audio") {
-      useApp.getState().toast({ kind: "warning", title: "Audio files go on the Audio or Music track." });
-      return;
-    }
-    if ((type === "audio" || type === "music") && !m.hasAudio) {
-      useApp.getState().toast({ kind: "warning", title: `${m.name} has no audio.` });
-      return;
-    }
-    const track = p.tracks.find((t) => t.type === type);
-    if (!track) {
-      useApp.getState().toast({ kind: "warning", title: `There is no ${type} track. Add one first.` });
-      return;
-    }
-    const clip: Clip = newClip(m, at ?? trackEnd(track));
-    get().commit((d) => {
-      d.tracks.find((t) => t.id === track.id)!.clips.push(clip);
-    });
-    set({ selection: { kind: "clip", trackId: track.id, clipId: clip.id } });
+    const warn = (title: string) => useApp.getState().toast({ kind: "warning", title });
+    const track = trackId
+      ? p.tracks.find((t) => t.id === trackId)
+      : p.tracks.find((t) => t.type === (m.type === "audio" ? "music" : "video"));
+    if (!track) return warn(`There is no ${m.type === "audio" ? "music" : "main video"} track. Add one first.`);
+    if (track.locked) return warn(`“${track.name}” is locked. Unlock it first.`);
+    if (track.type === "text") return warn("Text clips are added from the Text panel (Phase 6).");
+    if ((track.type === "video" || track.type === "overlay") && m.type === "audio") return warn("Audio files go on an Audio or Music track.");
+    if ((track.type === "audio" || track.type === "music") && !m.hasAudio) return warn(`${m.name} has no audio.`);
+    const clip: Clip = newClip(m, 0);
+    get().commit((d) => ops.insertClip(d, track.id, clip, at ?? trackEnd(track)));
+    set({ selection: { kind: "clip", clipId: clip.id } });
   },
 
-  deleteSelectedClip: () => {
+  deleteSelectedClip: (ripple = false) => {
+    const s = get().selection;
+    if (s.kind === "marker") {
+      get().commit((d) => ops.removeMarker(d, s.id));
+      set({ selection: { kind: "none" } });
+      return;
+    }
+    if (s.kind !== "clip") return;
+    const hit = get().project && ops.findClip(get().project!, s.clipId);
+    if (hit?.track.locked) return void useApp.getState().toast({ kind: "warning", title: `“${hit.track.name}” is locked.` });
+    get().commit((d) => ops.deleteClip(d, s.clipId, ripple));
+    set({ selection: { kind: "none" } });
+  },
+
+  splitAtPlayhead: () => {
+    const { project, playhead, selection } = get();
+    if (!project) return;
+    let made: string[] = [];
+    const sel = selection.kind === "clip" ? ops.findClip(project, selection.clipId) : null;
+    const inSel = sel && playhead > sel.clip.start && playhead < clipEnd(sel.clip);
+    get().commit((d) => {
+      made = inSel ? [ops.splitClip(d, sel!.clip.id, playhead)].filter((x): x is string => !!x) : ops.splitAll(d, playhead);
+    });
+    if (!made.length) {
+      // Nothing changed: drop the empty undo step.
+      set({ past: get().past.slice(0, -1) });
+      useApp.getState().toast({ kind: "info", title: "Nothing to split here", detail: "Move the playhead over a clip (not at its edge)." });
+    }
+  },
+
+  duplicateSelected: () => {
     const s = get().selection;
     if (s.kind !== "clip") return;
-    get().commit((d) => {
-      const t = d.tracks.find((t) => t.id === s.trackId);
-      if (t) t.clips = t.clips.filter((c) => c.id !== s.clipId);
-      d.transitions = d.transitions.filter((x) => x.fromClipId !== s.clipId && x.toClipId !== s.clipId);
-    });
-    set({ selection: { kind: "none" } });
+    let id: string | null = null;
+    get().commit((d) => void (id = ops.duplicateClip(d, s.clipId)));
+    if (id) set({ selection: { kind: "clip", clipId: id } });
+  },
+
+  addMarkerAtPlayhead: () => {
+    let id: string | null = null;
+    get().commit((d) => void (id = ops.addMarker(d, get().playhead)));
+    if (id) set({ selection: { kind: "marker", id } });
+    else set({ past: get().past.slice(0, -1) });
+  },
+
+  setSnapping: (snapping) => {
+    try {
+      localStorage.setItem("ligxt.snapping", snapping ? "1" : "0");
+    } catch {
+      /* storage unavailable */
+    }
+    set({ snapping });
+  },
+
+  fromBase: (fn) => {
+    const base = get().gestureStart ?? get().project;
+    if (!base) return;
+    const next = structuredClone(base);
+    fn(next);
+    set({ project: next, saveState: "dirty" });
+  },
+
+  mediaDuration: (id) => {
+    const m = id ? get().media[id] : undefined;
+    return !m || m.type === "image" ? Infinity : m.duration;
   },
 
   save: async (kind = "manual") => {
@@ -240,12 +301,18 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 }));
 
+function readSnapping(): boolean {
+  try {
+    return localStorage.getItem("ligxt.snapping") !== "0";
+  } catch {
+    return true;
+  }
+}
+
 function validSelection(s: EditorState): Selection {
   const sel = s.selection;
-  if (sel.kind === "clip") {
-    const t = s.project?.tracks.find((t) => t.id === sel.trackId);
-    if (!t?.clips.some((c) => c.id === sel.clipId)) return { kind: "none" };
-  }
+  if (sel.kind === "clip" && !(s.project && ops.findClip(s.project, sel.clipId))) return { kind: "none" };
+  if (sel.kind === "marker" && !s.project?.markers.some((m) => m.id === sel.id)) return { kind: "none" };
   if (sel.kind === "media" && !s.project?.media.includes(sel.id)) return { kind: "none" };
   return sel;
 }
@@ -255,9 +322,8 @@ export function useSelectedClip(): { clip: Clip; trackId: string; trackType: Tra
   const sel = useEditor((s) => s.selection);
   const project = useEditor((s) => s.project);
   if (sel.kind !== "clip" || !project) return null;
-  const t = project.tracks.find((t) => t.id === sel.trackId);
-  const clip = t?.clips.find((c) => c.id === sel.clipId);
-  return t && clip ? { clip, trackId: t.id, trackType: t.type } : null;
+  const hit = ops.findClip(project, sel.clipId);
+  return hit ? { clip: hit.clip, trackId: hit.track.id, trackType: hit.track.type } : null;
 }
 
 export function clipAtTime(p: Project, time: number): { clip: Clip; trackId: string } | null {
