@@ -131,6 +131,8 @@ export default function Editor({ projectId }: { projectId: string }) {
         s.splitAtPlayhead();
       } else if (k === "j" || k === "k" || k === "l" || k === "J" || k === "K" || k === "L") {
         s.shuttle(k.toLowerCase() as "j" | "k" | "l");
+      } else if (k.toLowerCase() === "t") {
+        s.addTransitionNearPlayhead();
       } else if (k.toLowerCase() === "m") {
         s.addMarkerAtPlayhead();
       } else if (k.toLowerCase() === "n") {
@@ -285,11 +287,12 @@ const SHORTCUTS: [string, string, boolean?][] = [
   ["← / →", "Step one frame"],
   ["Shift + ← / →", "Step one second"],
   ["Home / End", "Go to start / end"],
-  ["Delete", "Delete selected clip or marker"],
+  ["Delete", "Delete selected clip, marker or transition"],
   ["Shift + Delete", "Ripple delete (close the gap)"],
   ["S", "Split at playhead"],
   ["Ctrl + D", "Duplicate clip"],
   ["M", "Add marker"],
+  ["T", "Add a transition at the nearest cut"],
   ["N", "Snapping on / off"],
   ["Alt + drag", "Invert snapping while dragging"],
   ["Double-click track name", "Rename track"],

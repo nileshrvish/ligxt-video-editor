@@ -6,6 +6,7 @@ Range export only renders the clips that overlap the range.
 """
 from __future__ import annotations
 
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ from .jobs import JobContext, jobs
 from .media import load_meta, original_path
 from .models import Clip, Project
 from .projects import load_project
+from .transitions import ALL_TYPES, WHIP_TYPES, TransitionPlan, plan_transition
 
 router = APIRouter(prefix="/api", tags=["export"])
 
@@ -110,6 +112,30 @@ def overlay_geometry(m: dict, c: Clip, W: int, H: int) -> dict:
     return {"sw": sw, "sh": sh, "crop": mode == "fill" and (cw < sw or ch < sh), "cw": cw, "ch": ch}
 
 
+WHIP_FPS = 240  # sub-frame rate for the whip pan's motion blur
+WHIP_SAMPLES = 8  # sub-frames averaged per output frame (a 1/30 s shutter at 240 fps)
+
+
+def whip_chain(g: Graph, va: str, vb: str, out: str, kind: str, D: float, W: int, H: int, fps: float) -> None:
+    """Custom whip pan: an eased (cubic in-out) slide of A out and B in, with real motion blur from
+    averaging sub-frames. Mirrored by frontend/src/player/transitions.ts."""
+    u = f"min(t/{_f(D)},1)"
+    e = f"if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)"
+    pos = {
+        "whipleft": (f"-W*({e})", "0", f"W-W*({e})", "0"),
+        "whipright": (f"W*({e})", "0", f"-W+W*({e})", "0"),
+        "whipup": ("0", f"-H*({e})", "0", f"H-H*({e})"),
+        "whipdown": ("0", f"H*({e})", "0", f"-H+H*({e})"),
+    }[kind]
+    bgl, a2, b2, t1, t2 = g.label("wbg"), g.label("wa"), g.label("wb"), g.label("wt"), g.label("wt")
+    g.add(f"color=c=black:s={W}x{H}:r={WHIP_FPS}:d={_f(D + 0.1)},format=yuv420p[{bgl}]")
+    g.add(f"[{va}]fps={WHIP_FPS}[{a2}]")
+    g.add(f"[{vb}]fps={WHIP_FPS}[{b2}]")
+    g.add(f"[{bgl}][{a2}]overlay=x='{pos[0]}':y='{pos[1]}':eval=frame:eof_action=pass[{t1}]")
+    g.add(f"[{t1}][{b2}]overlay=x='{pos[2]}':y='{pos[3]}':eval=frame:eof_action=pass[{t2}]")
+    g.add(f"[{t2}]tmix=frames={WHIP_SAMPLES},fps={_f(fps)},trim=duration={_f(D)},format=yuv420p[{out}]")
+
+
 @dataclass
 class Plan:
     args: list[str]
@@ -163,6 +189,7 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     segs_v: list[str] = []
     segs_a: list[str] = []
     main_muted = main.muted if main else False
+    main_vol = main.volume if main else 1
 
     # Segment boundaries are snapped to the output frame grid (absolute, not per segment), so
     # rounding never accumulates: every cut lands within half a frame of its timeline time.
@@ -180,51 +207,114 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         segs_v.append(v)
         segs_a.append(a)
 
-    cursor = r0
-    for c in clips:
-        c_start, c_end = c.start, c.start + clip_duration(c)
-        if c_end <= r0 + EPS or c_start >= r1 - EPS:
-            continue
-        a_t, b_t = max(c_start, r0, cursor), min(c_end, r1)
-        if b_t - a_t <= EPS:
-            continue  # fully covered by an earlier overlapping clip
-        if a_t - cursor > EPS:
-            gap(cursor, a_t)
-        nf = frame_of(b_t) - frame_of(a_t)
-        if nf <= 0:
-            cursor = b_t
-            continue  # shorter than half a frame at this position
+    def clip_source(c: Clip, t_from: float, nf: int) -> tuple[str, str]:
+        """Video + audio labels for clip `c` from timeline time `t_from`, exactly `nf` frames long.
+        Reaches past the clip's in/out points (transition handles); where the source has no footage
+        the first/last frame is held and the audio is silent."""
+        m = metas[c.mediaId]
         seg = nf / fps
         speed = c.speed or 1
-        src_in = c.inPoint + (a_t - c_start) * speed
-        m = metas[c.mediaId]
+        src = c.inPoint + (t_from - c.start) * speed
+        lead = 0.0
+        if m["type"] != "image":
+            if src < 0:
+                lead, src = -src / speed, 0.0
+            mfps = m.get("fps") or fps
+            last = max(0.0, (m.get("duration") or 0) - 1.5 / mfps)
+            if src > last:  # entirely past the end: start at the last frame and hold it
+                src = last
         path = str(original_path(m))
-        fit = c.fit or default_fit
-
         if m["type"] == "image":
             idx = g.add_input(["-loop", "1", "-framerate", _f(fps), "-t", _f(seg + 0.1), "-i", path])
         else:
-            idx = g.add_input(["-ss", _f(src_in), "-t", _f(seg * speed + 0.05), "-i", path])
-
+            idx = g.add_input(["-ss", _f(src), "-t", _f(max(0.1, (seg - lead) * speed + 0.1)), "-i", path])
         vin = g.label("v")
         pre = f"setpts=(PTS-STARTPTS)/{_f(speed)}," if abs(speed - 1) > EPS else "setpts=PTS-STARTPTS,"
         hdr = TONEMAP + "," if m.get("hdr") else ""
         g.add(f"[{idx}:v]{hdr}{pre}fps={_f(fps)}[{vin}]")
-        fitted = fit_chain(g, vin, fit, W, H, bg)
+        fitted = fit_chain(g, vin, c.fit or default_fit, W, H, bg)
         vout = g.label("cv")
-        g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p,tpad=stop_mode=clone:stop=2,"
-              f"trim=end_frame={nf},setpts=PTS-STARTPTS[{vout}]")
-        segs_v.append(vout)
-
+        pad = f"tpad=start_mode=clone:start_duration={_f(lead)}:stop_mode=clone:stop_duration={_f(seg + 0.1)}"
+        g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p,{pad},trim=end_frame={nf},setpts=PTS-STARTPTS[{vout}]")
         aout = g.label("ca")
         if m.get("hasAudio") and m["type"] == "video" and not c.muted and not main_muted and c.volume > 0:
-            vol = c.volume * (main.volume if main else 1)
+            delay = f"adelay={int(round(lead * 1000))}:all=1," if lead > 0 else ""
             g.add(f"[{idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo{atempo(speed)},"
-                  f"volume={_f(vol)},apad,atrim=duration={_f(seg)},asetpts=PTS-STARTPTS[{aout}]")
+                  f"volume={_f(c.volume * main_vol)},{delay}apad=whole_dur={_f(seg)},atrim=duration={_f(seg)},"
+                  f"asetpts=PTS-STARTPTS[{aout}]")
         else:
             g.add(f"anullsrc=r=48000:cl=stereo,atrim=duration={_f(seg)}[{aout}]")
-        segs_a.append(aout)
-        cursor = b_t
+        return vout, aout
+
+    # Transitions on the main track (centred on the cut, using handles).
+    by_id = {c.id: c for c in clips}
+
+    def src_dur(c: Clip) -> float:
+        m = metas[c.mediaId]
+        return math.inf if m["type"] == "image" else float(m["duration"])
+
+    plans: dict[str, TransitionPlan] = {}  # keyed by the outgoing clip id
+    for tr in project.transitions:
+        a, b = by_id.get(tr.fromClipId), by_id.get(tr.toClipId)
+        if not main or tr.trackId != main.id or not a or not b or a.id in plans:
+            continue
+        plan = plan_transition(tr.model_dump(), a.model_dump(), b.model_dump(), src_dur(a), src_dur(b))
+        if plan and plan.half > EPS and plan.type in ALL_TYPES:
+            plans[a.id] = plan
+    incoming = {p.to_id: p.half for p in plans.values()}
+
+    def transition_piece(p: TransitionPlan) -> None:
+        fa, fb = frame_of(p.start), frame_of(p.end)
+        lo, hi = max(fa, 0), min(fb, frame_of(r1))
+        nf = fb - fa
+        if nf <= 0 or hi <= lo:
+            return
+        va, aa = clip_source(by_id[p.from_id], p.start, nf)
+        vb, ab = clip_source(by_id[p.to_id], p.start, nf)
+        D = nf / fps
+        vx = g.label("tx")
+        if p.type in WHIP_TYPES:
+            whip_chain(g, va, vb, vx, p.type, D, W, H, fps)
+        else:
+            # Planar RGB: every plane is full size, so xfade's formulas apply as written (on yuv420p its
+            # zoomin indexes the half-size chroma planes with luma coordinates). Matches the preview shader.
+            ra, rb = g.label("ra"), g.label("rb")
+            g.add(f"[{va}]format=gbrp[{ra}]")
+            g.add(f"[{vb}]format=gbrp[{rb}]")
+            g.add(f"[{ra}][{rb}]xfade=transition={p.type}:duration={_f(D)}:offset=0,format=yuv420p[{vx}]")
+        v, a = g.label("tv"), g.label("ta")
+        g.add(f"[{vx}]trim=start_frame={lo - fa}:end_frame={hi - fa},setpts=PTS-STARTPTS[{v}]")
+        a1, a2 = g.label("tfa"), g.label("tfb")
+        g.add(f"[{aa}]afade=t=out:st=0:d={_f(D)}[{a1}]")
+        g.add(f"[{ab}]afade=t=in:st=0:d={_f(D)}[{a2}]")
+        g.add(f"[{a1}][{a2}]amix=inputs=2:normalize=0:duration=longest,"
+              f"atrim=start={_f((lo - fa) / fps)}:end={_f((hi - fa) / fps)},asetpts=PTS-STARTPTS[{a}]")
+        segs_v.append(v)
+        segs_a.append(a)
+
+    cursor = r0
+    for c in clips:
+        c_start, c_end = c.start, c.start + clip_duration(c)
+        solid_start = c_start + incoming.get(c.id, 0.0)
+        solid_end = c_end - (plans[c.id].half if c.id in plans else 0.0)
+        if not (solid_end <= r0 + EPS or solid_start >= r1 - EPS):
+            a_t, b_t = max(solid_start, r0, cursor), min(solid_end, r1)
+            if b_t - a_t > EPS:
+                if a_t - cursor > EPS:
+                    gap(cursor, a_t)
+                nf = frame_of(b_t) - frame_of(a_t)
+                if nf > 0:
+                    v, a = clip_source(c, a_t, nf)
+                    segs_v.append(v)
+                    segs_a.append(a)
+                cursor = b_t
+        if c.id in plans:
+            p = plans[c.id]
+            if p.end > r0 + EPS and p.start < r1 - EPS:
+                if max(p.start, r0) - cursor > EPS:
+                    gap(cursor, max(p.start, r0))
+                transition_piece(p)
+            cursor = max(cursor, min(p.end, r1))
 
     if r1 - cursor > EPS:
         gap(cursor, r1)

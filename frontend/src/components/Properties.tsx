@@ -3,6 +3,7 @@ import { api } from "../api";
 import { toastError, useApp } from "../store/app";
 import { useEditor, useSelectedClip } from "../store/editor";
 import * as ops from "../timeline/ops";
+import { mainTransitionPlans, TRANSITION_GROUPS, transitionLabel, UI_MIN } from "../timeline/transitions";
 import type { Aspect, Clip, FitMode, MediaMeta } from "../types";
 import { ASPECTS, clipDuration, fmtBytes, fmtDuration } from "../util";
 import { Icon } from "./Icons";
@@ -15,7 +16,9 @@ export default function Properties() {
     <div className="panel">
       <div className="panel-head">Properties</div>
       <div className="panel-body">
-        {sel.kind === "marker" ? (
+        {sel.kind === "transition" ? (
+          <TransitionProps id={sel.id} />
+        ) : sel.kind === "marker" ? (
           <MarkerProps id={sel.id} />
         ) : selClip ? (
           <ClipProps clip={selClip.clip} trackId={selClip.trackId} trackType={selClip.trackType} />
@@ -243,6 +246,97 @@ function BeatsSection({ clip, m }: { clip: Clip; m: MediaMeta }) {
           {job ? <><Icon name="loader" size={14} className="spin" /> Detecting beats…</> : <><Icon name="music" size={14} /> Detect beats</>}
         </button>
       )}
+    </div>
+  );
+}
+
+function TransitionProps({ id }: { id: string }) {
+  const project = useEditor((s) => s.project!);
+  const media = useEditor((s) => s.media);
+  const tr = project.transitions.find((t) => t.id === id);
+  if (!tr) return null;
+  const plan = mainTransitionPlans(project, (mid) => {
+    const m = mid ? media[mid] : undefined;
+    return !m || m.type === "image" ? Infinity : m.duration;
+  }).get(tr.fromClipId);
+  const st = useEditor.getState;
+  const set = (patch: { type?: string; duration?: number }, undoable = true) => {
+    st().commit((p) => void ops.setTransition(p, tr.fromClipId, tr.toClipId, patch), undoable);
+    const cur = st().project!.transitions.find((t) => t.id === id);
+    if (cur) st().setLastTransition({ type: cur.type, duration: cur.duration });
+  };
+  const spare = (v: number, side: "after its out point" | "before its in point") =>
+    !isFinite(v) ? "unlimited (photo)" : `${v.toFixed(2)} s spare ${side}`;
+  const preview = () => {
+    if (!plan) return;
+    st().setPlaying(false);
+    st().setPlayhead(Math.max(0, plan.cut - plan.half - 0.6));
+    setTimeout(() => st().setPlaying(true), 50);
+  };
+  return (
+    <div className="props">
+      <div>
+        <div className="label">Transition</div>
+        <h3>{transitionLabel(tr.type)}</h3>
+        <div className="faint" style={{ fontSize: 12 }}>Centred on the cut; uses footage beyond each clip's in/out points, so the timeline length doesn't change.</div>
+      </div>
+      <div className="prop-group">
+        {TRANSITION_GROUPS.map((g) => (
+          <div key={g.label}>
+            <div className="faint" style={{ fontSize: 11, marginBottom: 4 }}>{g.label}</div>
+            <div className="tr-grid">
+              {g.types.map((t) => (
+                <button key={t.id} className={`btn sm ${tr.type === t.id ? "toggle on" : ""}`} onClick={() => set({ type: t.id })}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="prop-group">
+        <div className="prop-row">
+          <label>Duration</label>
+          <div className="slider-row">
+            <input
+              type="range" min={UI_MIN} max={2} step={0.05} value={tr.duration}
+              onPointerDown={() => st().beginGesture()}
+              onPointerUp={() => st().endGesture()}
+              onChange={(e) => set({ duration: +e.target.value }, false)}
+            />
+            <span className="mono faint" style={{ fontSize: 11 }}>{tr.duration.toFixed(2)} s</span>
+          </div>
+        </div>
+        {plan && (
+          <dl className="kv">
+            <dt>Actual length</dt><dd>{(2 * plan.half).toFixed(2)} s</dd>
+            <dt>Left clip</dt><dd>{spare(plan.spareA, "after its out point")}</dd>
+            <dt>Right clip</dt><dd>{spare(plan.spareB, "before its in point")}</dd>
+          </dl>
+        )}
+        {plan?.message && (
+          <div className="tr-warning">
+            <Icon name="alert" size={13} /> {plan.message}
+          </div>
+        )}
+        {!plan && <div className="error-text" style={{ fontSize: 12 }}>These clips are no longer next to each other, so this transition is inactive.</div>}
+      </div>
+      <div className="prop-group">
+        <button className="btn" onClick={preview} disabled={!plan}><Icon name="play" size={13} /> Preview</button>
+        <button
+          className="btn"
+          onClick={() => {
+            let n = 0;
+            st().commit((p) => void (n = ops.applyTransitionToAll(p, tr.trackId, tr.type, tr.duration)));
+            useApp.getState().toast({ kind: "success", title: `${transitionLabel(tr.type)} applied to ${n} cut${n === 1 ? "" : "s"}` });
+          }}
+        >
+          Apply to all cuts
+        </button>
+        <button className="btn danger" onClick={() => st().deleteSelectedClip()}>
+          <Icon name="trash" size={14} /> Remove transition
+        </button>
+      </div>
     </div>
   );
 }

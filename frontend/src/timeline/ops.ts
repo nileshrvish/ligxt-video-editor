@@ -263,6 +263,38 @@ export function pruneTransitions(p: Project): void {
   });
 }
 
+// ---------------------------------------------------------------- transitions
+/** Add or update the transition on the cut between `fromId` and `toId` (they must be neighbours). */
+export function setTransition(p: Project, fromId: string, toId: string, patch: { type?: string; duration?: number }): string | null {
+  const a = findClip(p, fromId);
+  const b = findClip(p, toId);
+  if (!a || !b || a.track !== b.track || Math.abs(clipEnd(a.clip) - b.clip.start) > 1e-3) return null;
+  let tr = p.transitions.find((x) => x.fromClipId === fromId && x.toClipId === toId);
+  if (!tr) {
+    tr = { id: uid(), trackId: a.track.id, fromClipId: fromId, toClipId: toId, type: "fade", duration: 0.5 };
+    p.transitions.push(tr);
+  }
+  if (patch.type) tr.type = patch.type;
+  if (patch.duration != null) tr.duration = Math.min(2, Math.max(0.1, patch.duration));
+  return tr.id;
+}
+
+export function removeTransition(p: Project, id: string): void {
+  p.transitions = p.transitions.filter((t) => t.id !== id);
+}
+
+/** Put the same transition on every cut of a track. Returns how many cuts got one. */
+export function applyTransitionToAll(p: Project, trackId: string, type: string, duration: number): number {
+  const t = p.tracks.find((x) => x.id === trackId);
+  if (!t) return 0;
+  const s = [...t.clips].sort((a, b) => a.start - b.start);
+  let n = 0;
+  for (let i = 0; i + 1 < s.length; i++) {
+    if (Math.abs(clipEnd(s[i]) - s[i + 1].start) < 1e-3 && setTransition(p, s[i].id, s[i + 1].id, { type, duration })) n++;
+  }
+  return n;
+}
+
 // ---------------------------------------------------------------- tracks
 const TRACK_NAMES: Record<TrackType, string> = { video: "Main video", overlay: "Overlay", text: "Text", audio: "Audio", music: "Music" };
 

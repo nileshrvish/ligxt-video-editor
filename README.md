@@ -55,6 +55,7 @@ Press **?** in the editor to see this list.
 | S | Split at playhead (selected clip, or every clip under the playhead) |
 | Ctrl + D | Duplicate clip |
 | M | Add marker at playhead |
+| T | Add a transition at the nearest cut (uses the last type you picked) |
 | N | Snapping on/off (hold Alt while dragging to invert) |
 | Ctrl + Z / Ctrl + Y | Undo / redo |
 | Ctrl + S | Save |
@@ -64,6 +65,8 @@ Press **?** in the editor to see this list.
 | J / K / L | Shuttle back / stop / forward (press J or L again for 2×, 4×, 8×) |
 
 Preview: the scrub bar under the picture scrubs, **Safe areas** shows where Instagram's Reels UI covers the video, and the fullscreen button sits next to it. Music: select a music clip and click **Detect beats**. Beats become snap points, and you can drop markers on every beat or bar.
+
+Transitions: hover a cut on the main track and click **+**, or press **T**. Click the block to choose one of 21 types (fades, whip pans, slides, wipes, zoom, circle, pixelize, radial), set 0.2–2 s, or **Apply to all cuts**. Transitions are centred on the cut and use footage beyond each clip's in/out points, so your timing never moves. A ⚠ means a clip ran out of spare footage: the transition was shortened, or the edge frame is held.
 
 Timeline mouse: drag a clip to move it (or to another track of the same kind), drag its edges to trim, drag a marker flag to move it, double-click a track name to rename it. The main video track is magnetic by default (no gaps; dragging reorders). Turn that off with the **Magnetic** button.
 

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { api, uploadMedia } from "../api";
 import type { Clip, MediaMeta, Project, TrackType } from "../types";
 import * as ops from "../timeline/ops";
+import { cuts as cutPairs } from "../timeline/transitions";
 import { clipEnd, newClip, trackEnd } from "../util";
 import { toastError, useApp } from "./app";
 
@@ -9,7 +10,8 @@ export type Selection =
   | { kind: "none" }
   | { kind: "media"; id: string }
   | { kind: "clip"; clipId: string }
-  | { kind: "marker"; id: string };
+  | { kind: "marker"; id: string }
+  | { kind: "transition"; id: string };
 
 export interface Upload {
   key: string;
@@ -60,6 +62,12 @@ interface EditorState {
   addToTimeline: (mediaId: string, trackId?: string, at?: number) => void;
   deleteSelectedClip: (ripple?: boolean) => void;
   splitAtPlayhead: () => void;
+  /** Add (or select) a transition on the cut between two clips, using the last-used type/length. */
+  addTransition: (fromId: string, toId: string) => void;
+  /** T key: add a transition at the cut nearest the playhead on the main track. */
+  addTransitionNearPlayhead: () => void;
+  lastTransition: { type: string; duration: number };
+  setLastTransition: (t: { type: string; duration: number }) => void;
   duplicateSelected: () => void;
   addMarkerAtPlayhead: () => void;
   snapping: boolean;
@@ -87,6 +95,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   future: [],
   gestureStart: null,
   snapping: readSnapping(),
+  lastTransition: { type: "fade", duration: 0.5 },
 
   load: async (id) => {
     const project = await api.getProject(id);
@@ -232,6 +241,11 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   deleteSelectedClip: (ripple = false) => {
     const s = get().selection;
+    if (s.kind === "transition") {
+      get().commit((d) => ops.removeTransition(d, s.id));
+      set({ selection: { kind: "none" } });
+      return;
+    }
     if (s.kind === "marker") {
       get().commit((d) => ops.removeMarker(d, s.id));
       set({ selection: { kind: "none" } });
@@ -259,6 +273,31 @@ export const useEditor = create<EditorState>((set, get) => ({
       useApp.getState().toast({ kind: "info", title: "Nothing to split here", detail: "Move the playhead over a clip (not at its edge)." });
     }
   },
+
+  addTransition: (fromId, toId) => {
+    const existing = get().project?.transitions.find((t) => t.fromClipId === fromId && t.toClipId === toId);
+    if (existing) return set({ selection: { kind: "transition", id: existing.id } });
+    const { type, duration } = get().lastTransition;
+    let id: string | null = null;
+    get().commit((d) => void (id = ops.setTransition(d, fromId, toId, { type, duration })));
+    if (id) set({ selection: { kind: "transition", id } });
+    else set({ past: get().past.slice(0, -1) });
+  },
+
+  addTransitionNearPlayhead: () => {
+    const { project, playhead } = get();
+    const main = project?.tracks.find((t) => t.type === "video");
+    if (!main) return;
+    const pairs = cutPairs(main.clips);
+    if (!pairs.length) {
+      useApp.getState().toast({ kind: "info", title: "No cuts to put a transition on", detail: "Place two clips next to each other on the main track." });
+      return;
+    }
+    const [a, b] = pairs.reduce((best, pr) => (Math.abs(pr[1].start - playhead) < Math.abs(best[1].start - playhead) ? pr : best));
+    get().addTransition(a.id, b.id);
+  },
+
+  setLastTransition: (lastTransition) => set({ lastTransition }),
 
   duplicateSelected: () => {
     const s = get().selection;
@@ -326,6 +365,7 @@ function validSelection(s: EditorState): Selection {
   const sel = s.selection;
   if (sel.kind === "clip" && !(s.project && ops.findClip(s.project, sel.clipId))) return { kind: "none" };
   if (sel.kind === "marker" && !s.project?.markers.some((m) => m.id === sel.id)) return { kind: "none" };
+  if (sel.kind === "transition" && !s.project?.transitions.some((t) => t.id === sel.id)) return { kind: "none" };
   if (sel.kind === "media" && !s.project?.media.includes(sel.id)) return { kind: "none" };
   return sel;
 }

@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../store/app";
 import { useEditor } from "../store/editor";
 import * as ops from "../timeline/ops";
+import { cuts as cutPairs, mainTransitionPlans, transitionLabel } from "../timeline/transitions";
 import type { Clip, MediaMeta, Track, TrackType } from "../types";
 import { clipDuration, clipEnd, contentEnd, TRACK_COLORS } from "../util";
 import { Icon } from "./Icons";
@@ -298,6 +299,7 @@ export default function Timeline() {
                   />
                 ))}
                 {ghost && ghost.trackId === t.id && <div className="tl-ghost" style={{ left: ghost.start * pps, width: ghost.dur * pps }} />}
+                {t.type === "video" && <TransitionBlocks track={t} pps={pps} />}
               </div>
             ))}
             {project.markers.map((m) => (
@@ -321,6 +323,57 @@ function beatPoints(p: { tracks: Track[] }, media: Record<string, MediaMeta>, ex
     for (const c of t.clips) if (c.id !== excludeId && c.mediaId) out.push(...ops.clipBeats(c, media[c.mediaId]?.beats));
   }
   return out;
+}
+
+/** Transition blocks centred on each cut of the main track, plus "+" buttons on bare cuts. */
+function TransitionBlocks({ track, pps }: { track: Track; pps: number }) {
+  const project = useEditor((s) => s.project!);
+  const media = useEditor((s) => s.media);
+  const selected = useEditor((s) => (s.selection.kind === "transition" ? s.selection.id : null));
+  const plans = mainTransitionPlans(project, (id) => {
+    const m = id ? media[id] : undefined;
+    return !m || m.type === "image" ? Infinity : m.duration;
+  });
+  if (track.locked) return null;
+  return (
+    <>
+      {cutPairs(track.clips).map(([a, b]) => {
+        const plan = plans.get(a.id);
+        const tr = project.transitions.find((x) => x.fromClipId === a.id && x.toClipId === b.id);
+        if (!plan || !tr) {
+          return (
+            <button
+              key={`add-${a.id}`}
+              className="tl-addtr"
+              style={{ left: b.start * pps - 9 }}
+              title="Add a transition here (T)"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => useEditor.getState().addTransition(a.id, b.id)}
+            >
+              +
+            </button>
+          );
+        }
+        const w = Math.max(plan.status === "ok" ? 14 : 26, 2 * plan.half * pps);
+        return (
+          <div
+            key={tr.id}
+            data-transition-id={tr.id}
+            className={`tl-trans ${selected === tr.id ? "sel" : ""} ${plan.status !== "ok" ? "warn" : ""}`}
+            style={{ left: plan.cut * pps - w / 2, width: w }}
+            title={`${transitionLabel(plan.type)} · ${(2 * plan.half).toFixed(2)} s${plan.message ? `\n⚠ ${plan.message}` : ""}`}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              useEditor.getState().select({ kind: "transition", id: tr.id });
+            }}
+          >
+            <span>⋈</span>
+            {plan.status !== "ok" && <span className="tr-warn">⚠</span>}
+          </div>
+        );
+      })}
+    </>
+  );
 }
 
 function AddTrackMenu() {
