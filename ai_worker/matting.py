@@ -95,6 +95,9 @@ def unload() -> None:
     seg = sys.modules.get("segment")
     if seg is not None:
         seg._sam.update(key=None, video=None, image=None, device=None)
+    itp = sys.modules.get("interp")
+    if itp is not None:
+        itp.unload_rife()
     try:
         import torch
         if torch.cuda.is_available():

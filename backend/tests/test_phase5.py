@@ -143,6 +143,7 @@ def test_speed_ramp_reverse_freeze_frame_exact(client, media, variant):
         clip["speed"] = 2
     elif variant == "ramp":
         clip["speedRamp"] = {"points": [{"u": 0, "speed": 1}, {"u": 0.55, "speed": 1}, {"u": 1, "speed": 0.3}]}
+        clip["slowmo"] = {"quality": "repeat"}  # source frames only (slowed clips default to AI smooth since Phase 10)
     elif variant == "reverse":
         clip["reverse"] = True
     else:

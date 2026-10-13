@@ -51,7 +51,7 @@ Stop it with **Ctrl+C** in the terminal. The version (v1.1.0) is shown on the Ho
 Select a video or photo clip and turn on **Properties > Cutout (AI) > Cut out the subject**. The subject is analysed once in the background ("Analyzing subject… 40%", with Cancel) and cached, so the preview and later exports are instant. The first use of a model downloads it (the size is shown; Settings lists every model).
 
 - **Subject**: *Person (auto)* finds people automatically; *Object (click)* lets you click any object on the preview (Shift+click = "not this"), **Preview selection** shows what is selected, and **Cut out this object** tracks it through the clip.
-- **Edges**: *Smooth* steadies the edge between frames (less flicker), *Shrink/grow* pulls the edge in or out, *Feather* softens it, *Hair detail* keeps fine edges sharp. Edge changes take seconds; the analysis is reused.
+- **Edges**: *Smooth* steadies the edge between frames (less flicker), *Motion blur* fills in the soft edge of fast-moving arms and hands so text behind the subject doesn't show through, *Shrink/grow* pulls the edge in or out, *Feather* softens it, *Hair detail* keeps fine edges sharp. Edge changes take seconds; the analysis is reused.
 - **Background**: keep, blur, a colour, a photo, or another video (overlay tracks: keep or remove, so only the subject shows over the tracks below).
 - **Glow / outline** around the subject: colour, width, softness (0 = crisp outline), opacity, and a pulse that is **on the beat** (from the song's detected beats) or steady.
 - **Drop shadow**: colour, opacity, blur, offset.
@@ -121,6 +121,18 @@ Colour & effects: select a clip and open **Colour & effects** in Properties.
 - Preview: **Before/After** shows a draggable split; **Scopes** shows a histogram, a waveform and how much of the picture is crushed or clipped.
 
 Timeline mouse: drag a clip to move it (or to another track of the same kind), drag its edges to trim, drag a marker flag to move it, double-click a track name to rename it. The main video track is magnetic by default (no gaps; dragging reorders). Turn that off with the **Magnetic** button.
+
+## AI slow motion
+
+Slow a video clip below 1x (Properties > Motion > Speed, a speed ramp, or a template) and Ligxt fills in the missing frames.
+
+- **Slow-mo quality** (per clip): *Frame repeat* (each frame shown several times, stutters), *Frame blending* (mixes neighbouring frames, smooth but soft), *AI smooth* (RIFE 4.26 builds real in-between frames). *Auto* is the default: AI smooth when the clip is slowed, frame repeat otherwise.
+- **Smooth motion**: also interpolates clips at normal speed, so choppy or 24/25 fps footage plays as smooth 30/60 fps (frame-rate conversion).
+- Works with constant speed and speed ramps (only the slowed part is interpolated), reverse, transitions and Cutout (the cutout is analysed on the slowed frames, so it stays aligned).
+- **Scene cuts** inside a clip are detected and never interpolated across (those frames are repeated instead). Areas that don't move (text, graphics, logos) are kept from the source frames, not warped.
+- **Motion warning**: when a clip moves too fast for its slow-down (for example 4x on a fast hand movement), the panel warns and suggests a lower factor. Interpolation is a guess; very fast, thin or overlapping objects can warp.
+- Slow-mo is rendered in the background (progress, Cancel) and cached: a low-resolution version for the preview, full resolution for the export. A missing render is done inside the export job.
+- Speed on the RTX 4050 Laptop: about 7 in-between frames per second at 1080p and 2-3 at 4K (4K runs the flow at half resolution), using under 2.5 GB of graphics memory.
 
 ## Motion, speed and audio
 
@@ -199,6 +211,7 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 | BiRefNet (matting), default cutout model | MIT | 844 MB | huggingface.co/ZhengPeng7/BiRefNet-matting |
 | BiRefNet lite (matting), fast option | MIT | 85 MB | huggingface.co/ZhengPeng7/BiRefNet_lite-matting |
 | BiRefNet dynamic (matting) | MIT | 424 MB | huggingface.co/ZhengPeng7/BiRefNet_dynamic-matting |
+| RIFE 4.26 (AI slow motion), hzwer/Practical-RIFE | MIT | 23 MB download, 24.6 MB on disk | huggingface.co/hzwer/RIFE (revision 01fdc7e9; only `flownet.pkl` is kept; the network code is included in `ai_worker\rife_net.py`, so no downloaded code is run) |
 | SAM 2.1 small (click to select), Meta | Apache-2.0 | 176 MB | github.com/facebookresearch/sam2 (code pinned to commit 2b90b9f5, checkpoint from dl.fbaipublicfiles.com) |
 | PyTorch, torchvision | BSD-3-Clause | ~3 GB (ai-venv) | pytorch.org |
 | transformers, safetensors, timm, kornia | Apache-2.0 | | PyPI |
@@ -216,6 +229,7 @@ Not used: **RobustVideoMatting** is GPL-3.0 (its weights carry no separate licen
 - **A clip shows "Proxy failed"**: select the file and click **Rebuild proxy**. Export still uses the original either way.
 - **Cutout says the AI tools are not installed**: run `setup.ps1` again (it rebuilds `ai-venv` without touching anything else) and restart Ligxt. Settings > Check again shows what was found.
 - **Cutout is slow**: Settings shows whether it runs on the graphics card. On the CPU expect several seconds per frame; *BiRefNet lite* is about twice as fast as the default model.
+- **Slow motion warps or wobbles**: lower the slow-down (4x -> 2x), or choose *Frame blending* for that clip.
 - **"The graphics card ran out of memory"**: close games or other GPU apps, or lower Settings > GPU memory limit.
 - **Port already in use**: `.\start.ps1 -Port 9000`.
 - **HDR iPhone footage looks washed out**: it is tone-mapped to SDR automatically in proxies and exports. If not, check that ffmpeg has `zscale` (the gyan.dev full build does).

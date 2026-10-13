@@ -78,8 +78,20 @@ CATALOG: dict[str, dict] = {
                    "sha256": "6d1aa6f30de5c92224f8172114de081d104bbd23dd9dc5c58996f0cad5dc4d38",
                    "url": "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt"}],
     },
+    "rife-4.26": {
+        "name": "RIFE 4.26 (AI slow motion)", "task": "interpolation", "license": "MIT",
+        "source": "https://github.com/hzwer/Practical-RIFE", "res": 0, "dynamic": False,
+        "about": "Frame interpolation by hzwer: smooth slow motion and frame-rate conversion (weights from the author's Hugging Face).",
+        "files": _hf("hzwer/RIFE", "01fdc7e97404120c243c3ea7b427046e5dc7643e", [
+            ("RIFEv4.26_0921.zip", 22869906, "1fa9b9cda3d9b8c3e301359e2595960902f97bf926c08598b0e9957a3f3f760e"),
+        ]),
+        # only the weights are used (the network code is vendored in ai_worker/rife_net.py)
+        "installs": [{"name": "flownet.pkl", "size": 24636301, "from": "RIFEv4.26_0921.zip", "member": "RIFEv4.26_0921/flownet.pkl",
+                      "sha256": "45c7f74156704769dc9f85cfcaf8552e1e926f9399dcfa3a553dee88fac6f53f"}],
+    },
 }
 PERSON_MODELS = [k for k, v in CATALOG.items() if v["task"] == "person"]
+RIFE_MODEL = "rife-4.26"
 OBJECT_MODEL = "sam2.1-small"
 DEFAULT_SETTINGS = {"device": "auto", "budgetGB": 4.5, "personModel": "birefnet"}  # best quality on the test clips
 
@@ -135,7 +147,7 @@ def is_installed(mid: str) -> bool:
     ok_file = d / ".verified"
     if not ok_file.exists():
         return False
-    return all((d / f["name"]).exists() and (d / f["name"]).stat().st_size == f["size"] for f in spec["files"])
+    return all((d / f["name"]).exists() and (d / f["name"]).stat().st_size == f["size"] for f in spec.get("installs") or spec["files"])
 
 
 def download_size(mid: str) -> int:
@@ -196,7 +208,17 @@ def download(mid: str, ctx: JobContext | None, p0: float = 0.0, p1: float = 1.0)
             raise RuntimeError(f"{f['name']} failed its checksum (the download was corrupted or the file changed upstream). "
                                "Nothing was installed; try again later.")
         part.replace(dest)
-    (d / ".verified").write_text(json.dumps({"verified": time.time(), "files": [f["name"] for f in spec["files"]]}), encoding="utf-8")
+    for inst in spec.get("installs") or []:
+        # unpack only the listed member of a verified archive, verify it too, then drop the archive
+        import zipfile
+        with zipfile.ZipFile(d / inst["from"]) as z:
+            data = z.read(inst["member"])
+        if len(data) != inst["size"] or hashlib.sha256(data).hexdigest() != inst["sha256"]:
+            raise RuntimeError(f"{inst['name']} inside {inst['from']} failed its checksum. Nothing was installed.")
+        (d / inst["name"]).write_bytes(data)
+    for inst in spec.get("installs") or []:
+        (d / inst["from"]).unlink(missing_ok=True)
+    (d / ".verified").write_text(json.dumps({"verified": time.time(), "files": [f["name"] for f in spec.get("installs") or spec["files"]]}), encoding="utf-8")
 
 
 def ensure_model(mid: str, ctx: JobContext | None, p0: float = 0.0, p1: float = 0.2) -> Path:

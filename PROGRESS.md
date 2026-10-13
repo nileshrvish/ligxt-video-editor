@@ -16,8 +16,9 @@ Read this first at the start of every session.
 | 7 | Style templates: save as template, gallery, use-template wizard (beat fitting, face-aware motion, colour matching, text placement), management, .zip export/import, 3 built-ins | **Done** (2026-10-13) |
 | 8 | Polish and stability (v1.0): video slots, drop detection + energy curve, accent suggestion, crash recovery, tab locks, relink, disk checks, tray launcher + shortcut, start.sh, version, tour, media cleanup, recent exports, jobs popover, timeline performance, bug bash | **Done** (2026-10-13), tagged `v1.0` |
 | 9 | AI foundation (separate ai-venv worker, model manager + Settings page) and subject cutout: person matting (BiRefNet) + click-to-select objects (SAM 2.1), temporal smoothing, edges, background replace, glow/outline with beat pulse, drop shadow, subject/background-only grades, text behind the subject, templates; Cutout Demo | **Done** (2026-10-13), v1.1.0 |
+| 10 | AI slow motion: RIFE 4.26 frame interpolation (2x/4x/8x, smooth to 60 fps, frame-rate conversion), per-clip Slow-mo quality (repeat / blending / AI smooth), speed ramps incl. slow-mo into the drop, Cutout alignment, scene cuts, static-area lock, motion warnings, cached preview + full-res export, templates; motion-blur matte fix; Slow-mo Demo + Travel Dump reel | **Done** (2026-10-13), v1.2.0 |
 
-Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (89) and `cd frontend; npm test` (113). The AI tools: `ai-venv` (built by setup.ps1).
+Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (98) and `cd frontend; npm test` (115). The AI tools: `ai-venv` (built by setup.ps1).
 Git: commit to `master` and push after each tested phase or fix.
 
 ## Phase 1: what exists
@@ -146,6 +147,15 @@ Git: commit to `master` and push after each tested phase or fix.
 - **Performance** (3-minute, 64-clip project with a 4K phone video, Chrome 1366x768): edits use immer structural sharing (only changed clips re-render), safety checks deferred, waveform canvas capped at 4096 px, ruler ticks as CSS gradients. Drag 116 -> 21 ms per move, zoom 408 -> 41 ms, split 75 -> 6 ms, undo 50 -> 19 ms; preview playback and scrubbing were already smooth.
 - Tests: `backend/tests/test_phase8.py` (locks, relink, disk space, recent exports + re-export, media cleanup, energy + drop, accent + generate, muted video slots).
 
+## Usage rules (set by the user in Phase 10; apply to every phase)
+
+- No Claude in Chrome or any interactive browser control for editing or testing videos (it uses too much of the usage limit).
+- Make edits directly: project JSON files, or the backend API / CLI from scripts. Export with the backend's render code or a script, not by clicking in the UI.
+- Test with automated tests only: pytest and frontend unit tests; a UI flow that needs checking gets a headless Playwright script (no screenshots unless a failure needs debugging).
+- Check video results by extracting frames with ffmpeg and measuring them in scripts, not by viewing the app.
+- Leave the visual and click-through checks to the user, with a clear test checklist.
+- Use only media from `C:\Users\niles\ligxt-test-media` and the projects the user names; don't search other folders. If that folder is missing or empty, stop and say so. (Phase 10: the folder was still missing; the user named the "Travel Dump" project, whose media were used.)
+
 ## AI feature rules (apply to every AI phase)
 
 Set by the user in Phase 9; every later AI feature follows them.
@@ -184,9 +194,25 @@ Set by the user in Phase 9; every later AI feature follows them.
 - **Cutout Demo** (project "Cutout Demo", the reel's song, cuts on beats 0 / 3.97 / 7.96 / 11.96 / 15.98 s): "NO EXCUSES" behind the moving lifter; neon portrait with a cyan outline pulsing on every beat (background darkened); on the drop a whip up into the curls shot with the gym replaced by the mountain-road clip (another video) + shadow; pull-ups with a B&W background and the athlete in colour. All titles clear of the Reels zones. Export `exports\Cutout Demo.mp4`; before/after images in `exports\cutout demo\`.
 - **Test clips**: the folder `C:\Users\niles\ligxt-test-media` didn't exist; the ten clips downloaded to Downloads just before the request (Pexels-style names, 4K/1080p, portrait and landscape: gym, neon portrait, roads, hands) were used (imported copies; Downloads untouched).
 
+## Phase 10 (v1.2.0): what exists
+
+- **RIFE 4.26** (`ai_worker/rife_net.py` = the IFNet network from Practical-RIFE, MIT, vendored with attribution; `ai_models.CATALOG["rife-4.26"]`): only `flownet.pkl` is extracted from `RIFEv4.26_0921.zip` at HF `hzwer/RIFE` revision 01fdc7e9 (zip and file SHA-256 pinned; zip deleted after extraction); loaded with `torch.load(weights_only=True)`. The catalog has a new `installs` mechanism (extract one file from an archive).
+- **Interpolation op** (`ai_worker/interp.py`, worker op `interp`): takes the exact output frame list `[source index, t]`, decodes only the needed source range (same seek/`fps=:round=near` as the export) into a memmap; modes `blend` (numpy; also runs in-process without ai-venv), `ai` (RIFE fp16, padded to a multiple of 128 / scale; flow at scale 0.5 when the short side > 1440 = 4K), `ai-test` (blend through the worker, for tests). **Scene cuts** (mean diff + histogram intersection) use the nearest frame; a **static-region lock** keeps areas where both frames agree from the linear mix (text/graphics don't warp); per-pair p95 flow (% of the long side) is recorded for the motion warning; batch <= 2; timing + peak VRAM stats.
+- **Planning** (`backend/app/slowmo.py`, `/api/slowmo/prepare`): per-clip `slowmo: {quality: auto|repeat|blend|ai, smooth}`; `frame_plan` builds the timeline frame grid through `motion.src_time` (speed, ramps, reverse), interpolates only where the local speed is < 1 (or everywhere with *smooth*, which also converts 24/25 fps to the timeline rate), and includes transition handles. Renders cached in `cache/<media>/slowmo/<key>_<full|preview>.mp4`; the full render is registered as derived media (`derivedFrom`, skipped by media cleanup). Warnings: p95 motion limits 4.0 % (2x), 2.5 % (4x), 1.8 % (8x), plus a note when scene cuts were found.
+- **Export** (`render.py`): missing renders run as plan tasks inside the export job; the clip's picture comes from the retimed file at speed 1, the audio from the original (pitch-preserved atempo); Cutout on a slowed clip analyses the retimed frames (`cut_info` takes the retimed meta), so matte and picture stay aligned; overlay clips supported; without ai-venv an AI clip fails with a message suggesting Frame blending.
+- **Preview** (`player/engine.ts`, `slowmo/assets.ts`): a slowed clip plays its low-res retimed render in its own muted video slot; the original element plays only the audio. Until the render is ready the clip plays as before (frame repeat).
+- **UI** (`SlowMoControls.tsx` in Motion > Speed): Slow-mo quality, Smooth motion, status/progress/Cancel, motion and scene-cut warnings.
+- **Templates**: video slots store the speed ramp and slow-mo settings; generation applies them (taking the extra source length) and reports "Slow motion on N video shot(s)".
+- **Phase 9 follow-up (motion blur in the cutout matte)**: `cutout.motion_fix` grows the matte's soft edge where DIS flow is fast (refine param `motion`, default 0.8; Edges > *Motion blur* slider). Measured on the deadlift's fast-moving fringe: show-through 42.5 % -> 15.5 % at 0.8 (0.5: 25.6 %, 1.0: 8.8 %), solid-area growth 2.3 %, no change in still areas. Old cached refined mattes regenerate once (the key includes the new param; the slow analysis is reused).
+- **Measured** (RTX 4050 Laptop): pure RIFE fp16 inference 11-13.6 fps at 1080p, 4.5-4.8 fps at 4K (scale 0.5); full pipeline (decode + interpolate + encode) 6.8 fps / 1.94 GB peak at 1080p, 3.0 fps / 2.36 GB at 4K (4K at full flow scale peaks at 3.1 GB), so no tiling was needed. Held-out frames (rebuild frame i+1 from i and i+2, PSNR): RIFE beats blending by 5-7 dB (hand reach 33.7 vs 26.6, deadlift 37.9 vs 32.2, road 37.6 vs 32.7, neon 38.8 vs 32.0); on the very fast hand reach RIFE still warps locally (worst block about the same as blending), which the motion warning catches at 4x.
+- **Slow-mo Demo** (project "Slow-mo Demo", the reel's song): road 24 -> 30 fps smoothed; deadlift ramp slowing into the drop (the cut lands exactly on frame 239 = the drop beat); 4x AI on the hand reach (warns, as expected); repeat / blending / AI side by side. Measured on the 4x shot: repeated frames 80 % / 0 % / 2 %, motion steadiness CV 2.42 / 0.36 / 0.51, sharpness 100 % / 75 % / 95 %. Export `exports\Slow-mo Demo.mp4`; frames + `report.md` in `exports\slow-mo demo\`.
+- **Travel Dump** (the user's project): edited into a travel reel; see the reel section below.
+- Tests: `backend/tests/test_phase10.py` (9: frame plans for constant speed and ramps, in-between frames for blending and the worker path, a scene cut is never mixed, the export shows the retimed frames, ramp into the drop + cutout alignment, template keeps the ramp, no AI tools message, real RIFE puts a moving box halfway), `frontend/src/slowmo/model.test.ts` (shared cases `shared/slowmo_cases.json`, 24).
+- **Test media**: `C:\Users\niles\ligxt-test-media` doesn't exist; the user named the **Travel Dump** project, so its media were used.
+
 ## Next
 
-- Waiting for the next phase (and the Phase 8 bug/friction list, still empty). Open question for the user: add RobustVideoMatting (GPL-3.0) for comparison?
+- Waiting for the next phase (and the Phase 8 bug/friction list, still empty). The test-media folder `C:\Users\niles\ligxt-test-media` still doesn't exist. Open question for the user: add RobustVideoMatting (GPL-3.0) for comparison?
 
 ## The user's reel ("Beat Sync Reel", project in projects\)
 
@@ -204,6 +230,8 @@ Set by the user in Phase 9; every later AI feature follows them.
 
 - Phase 9 (2026-10-13): copy **"Beat Sync Reel v7 test"** (v6.1 untouched, checked by checksum): Cutout on the first studio shot (default BiRefNet; clean edges, a little softness where the cheek meets the letters at 2x zoom). The hook at its v6.1 position behind the body was unreadable ("OR / TH…OP"), wrapped 4-line versions disappeared behind head and torso; final: split hook, "WAIT FOR" (240 px) behind the head and "THE DROP" in front, both clear of the Reels zones. Export `exports\Beat Sync Reel v7 test.mp4`; comparisons in `exports\v7 test comparison\`.
 
+- Phase 10 (2026-10-13): the reel has only photos, so there is nothing to slow down; it is unchanged. AI slow motion went into the new **Travel Dump** reel instead: project **"Travel Dump"** (21.7 s, Video-49331.mp3 from 26.08 s so its drop lands at 7.99 s, 104.8 BPM): red-car road hook "TRAVEL DUMP" + push-in; sky road "NO PLANS"; the hand reach ramping to 2x AI slow-mo into the drop ("JUST GO"), whip up onto the drop with whoosh + hit; one shot every 2 beats (mountains with a punch "BIG MOUNTAINS", clouds "BIGGER SKIES", red car "OPEN ROADS", sky road), white flash into the neon portrait "LATE NIGHTS" ending in 2x AI slow-mo; wide mountain road "see you on the road" with the music fading. Warm Film 45 % + vignette over everything; the 24/25 fps clips are AI-smoothed to 30 fps. Chose the roads, mountains, hand and neon shots; left out the gym clips (not travel) and the fidgeting hands. Checked by script: 1080x1920 30 fps, every hard cut on its beat frame, 0 black / 0 frozen frames, audio vs song offset 5 ms, no slow-mo warnings (hand reach 3.1 % at 1.9x, neon 3.4 % at 2x; limit 4.0 %). Export `exports\Travel Dump_20261013-225148.mp4`; stills in `exports\travel dump\`.
+
 ## Known issues / notes
 
 - Gotcha in PowerShell 5.1: `nativeExe | Select-Object -First 1` sets a non-zero `$LASTEXITCODE`. Capture the output to a variable first.
@@ -217,9 +245,10 @@ Set by the user in Phase 9; every later AI feature follows them.
   - Built-in template cards start on the plain "1" placeholder card (the preview animates on hover).
   - Exports made before v1.0 can't be re-exported from Recent exports (no recorded settings; the button explains).
   - A read-only tab still shows the editing controls as enabled; edits are refused with a toast instead of being greyed out.
-  - Cutout: on motion-blurred limbs the matte is soft, so text behind the subject shows faintly through fast-moving arms. Subjects in very dark scenes can lose parts (feet) with the default model.
+  - Cutout: on motion-blurred limbs the matte is soft; the Phase 10 motion-blur fix cuts the show-through by about two thirds, but very fast arms can still show text faintly. Subjects in very dark scenes can lose parts (feet) with the default model.
 - Cutout: during a transition the subject matte goes through the same transition, so text behind the subject follows it; a replaced background stays during the transition.
 - Cutout: overlay-track clips support background keep/remove, glow and shadow (no colour/photo/video background, no subject/background-only grade); text behind the subject uses the main track only.
+- Slow motion: interpolation can warp very fast, thin or overlapping motion (the motion warning suggests a lower factor); the preview shows frame repeat until the low-res render finishes (seconds to a minute); 4K AI renders run at about 2-3 frames per second.
 - Click-to-select uses the clicks of one or more frames but cannot be corrected mid-clip yet beyond adding clicks on other frames.
 - The template wizard can't take files from the media library (only new files), so the same photo imported twice is two media items.
   - The export dialog needs a scroll at 768 px height (the Export button is at the bottom).

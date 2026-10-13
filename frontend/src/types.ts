@@ -44,6 +44,8 @@ export interface Clip {
   speedRamp?: { points: { u: number; speed: number }[]; preset?: string } | null;
   /** Subject cutout (AI matte) and the effects built on it; see cutout/model.ts. */
   cutout?: import("./cutout/model").Cutout | null;
+  /** Slow-mo quality (frame repeat / blending / AI smooth) and frame-rate smoothing; see slowmo/model.ts. */
+  slowmo?: import("./slowmo/model").SlowMo | null;
   [extra: string]: unknown;
 }
 

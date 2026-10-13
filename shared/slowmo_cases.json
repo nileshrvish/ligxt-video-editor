@@ -1,0 +1,470 @@
+{
+ "cases": [
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1
+   },
+   "media": {
+    "type": "video",
+    "fps": 30
+   },
+   "fps": 30,
+   "quality": "repeat",
+   "minSpeed": 1.0,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1
+   },
+   "media": {
+    "type": "video",
+    "fps": 25
+   },
+   "fps": 30,
+   "quality": "repeat",
+   "minSpeed": 1.0,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1
+   },
+   "media": {
+    "type": "video",
+    "fps": 24
+   },
+   "fps": 60,
+   "quality": "repeat",
+   "minSpeed": 1.0,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 0.5
+   },
+   "media": {
+    "type": "video",
+    "fps": 30
+   },
+   "fps": 30,
+   "quality": "ai",
+   "minSpeed": 0.5,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 0.5
+   },
+   "media": {
+    "type": "video",
+    "fps": 25
+   },
+   "fps": 30,
+   "quality": "ai",
+   "minSpeed": 0.5,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 0.5
+   },
+   "media": {
+    "type": "video",
+    "fps": 24
+   },
+   "fps": 60,
+   "quality": "ai",
+   "minSpeed": 0.5,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 0.25,
+    "slowmo": {
+     "quality": "blend"
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 30
+   },
+   "fps": 30,
+   "quality": "blend",
+   "minSpeed": 0.25,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 0.25,
+    "slowmo": {
+     "quality": "blend"
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 25
+   },
+   "fps": 30,
+   "quality": "blend",
+   "minSpeed": 0.25,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 0.25,
+    "slowmo": {
+     "quality": "blend"
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 24
+   },
+   "fps": 60,
+   "quality": "blend",
+   "minSpeed": 0.25,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 0.5,
+    "slowmo": {
+     "quality": "repeat"
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 30
+   },
+   "fps": 30,
+   "quality": "repeat",
+   "minSpeed": 0.5,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 0.5,
+    "slowmo": {
+     "quality": "repeat"
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 25
+   },
+   "fps": 30,
+   "quality": "repeat",
+   "minSpeed": 0.5,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 0.5,
+    "slowmo": {
+     "quality": "repeat"
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 24
+   },
+   "fps": 60,
+   "quality": "repeat",
+   "minSpeed": 0.5,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1,
+    "slowmo": {
+     "quality": "ai",
+     "smooth": true
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 30
+   },
+   "fps": 30,
+   "quality": "ai",
+   "minSpeed": 1.0,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1,
+    "slowmo": {
+     "quality": "ai",
+     "smooth": true
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 25
+   },
+   "fps": 30,
+   "quality": "ai",
+   "minSpeed": 1.0,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1,
+    "slowmo": {
+     "quality": "ai",
+     "smooth": true
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 24
+   },
+   "fps": 60,
+   "quality": "ai",
+   "minSpeed": 1.0,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1,
+    "speedRamp": {
+     "points": [
+      {
+       "u": 0,
+       "speed": 1
+      },
+      {
+       "u": 0.55,
+       "speed": 1
+      },
+      {
+       "u": 0.7,
+       "speed": 0.3
+      },
+      {
+       "u": 1,
+       "speed": 0.3
+      }
+     ]
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 30
+   },
+   "fps": 30,
+   "quality": "ai",
+   "minSpeed": 0.3,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1,
+    "speedRamp": {
+     "points": [
+      {
+       "u": 0,
+       "speed": 1
+      },
+      {
+       "u": 0.55,
+       "speed": 1
+      },
+      {
+       "u": 0.7,
+       "speed": 0.3
+      },
+      {
+       "u": 1,
+       "speed": 0.3
+      }
+     ]
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 25
+   },
+   "fps": 30,
+   "quality": "ai",
+   "minSpeed": 0.3,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1,
+    "speedRamp": {
+     "points": [
+      {
+       "u": 0,
+       "speed": 1
+      },
+      {
+       "u": 0.55,
+       "speed": 1
+      },
+      {
+       "u": 0.7,
+       "speed": 0.3
+      },
+      {
+       "u": 1,
+       "speed": 0.3
+      }
+     ]
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 24
+   },
+   "fps": 60,
+   "quality": "ai",
+   "minSpeed": 0.3,
+   "needsRetime": true
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1,
+    "freezeFrame": 1.0
+   },
+   "media": {
+    "type": "video",
+    "fps": 30
+   },
+   "fps": 30,
+   "quality": "repeat",
+   "minSpeed": 1.0,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1,
+    "freezeFrame": 1.0
+   },
+   "media": {
+    "type": "video",
+    "fps": 25
+   },
+   "fps": 30,
+   "quality": "repeat",
+   "minSpeed": 1.0,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 1,
+    "freezeFrame": 1.0
+   },
+   "media": {
+    "type": "video",
+    "fps": 24
+   },
+   "fps": 60,
+   "quality": "repeat",
+   "minSpeed": 1.0,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 2,
+    "slowmo": {
+     "quality": "bogus"
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 30
+   },
+   "fps": 30,
+   "quality": "repeat",
+   "minSpeed": 2.0,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 2,
+    "slowmo": {
+     "quality": "bogus"
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 25
+   },
+   "fps": 30,
+   "quality": "repeat",
+   "minSpeed": 2.0,
+   "needsRetime": false
+  },
+  {
+   "clip": {
+    "inPoint": 0,
+    "outPoint": 2,
+    "speed": 2,
+    "slowmo": {
+     "quality": "bogus"
+    }
+   },
+   "media": {
+    "type": "video",
+    "fps": 24
+   },
+   "fps": 60,
+   "quality": "repeat",
+   "minSpeed": 2.0,
+   "needsRetime": false
+  }
+ ],
+ "defaults": {
+  "quality": "auto",
+  "smooth": false
+ }
+}

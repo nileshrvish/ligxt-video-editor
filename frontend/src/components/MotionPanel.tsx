@@ -3,6 +3,7 @@ import { useRef } from "react";
 import * as E from "../motion/edit";
 import { clipDuration as motionDuration, EASING_LABELS, EASINGS, RAMP_PRESETS, rampPoints, type Prop, type RampPoint } from "../motion/motion";
 import { useEditor } from "../store/editor";
+import SlowMoControls from "./SlowMoControls";
 import * as ops from "../timeline/ops";
 import type { Clip, MediaMeta } from "../types";
 import { clipDuration } from "../util";
@@ -150,7 +151,7 @@ export default function MotionPanel({ clip, trackType, m }: { clip: Clip; trackT
         </div>
       </div>
 
-      {isVideo && <SpeedSection clip={clip} update={update} D={D} isMain={isMain} />}
+      {isVideo && <SpeedSection clip={clip} update={update} D={D} isMain={isMain} m={m} />}
     </>
   );
 }
@@ -172,7 +173,7 @@ function ShakeButton({ onShake }: { onShake: (amount: number, duration: number) 
 
 const SPEED_STOPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 
-function SpeedSection({ clip, update, D, isMain }: { clip: Clip; update: Update; D: number; isMain: boolean }) {
+function SpeedSection({ clip, update, D, isMain, m }: { clip: Clip; update: Update; D: number; isMain: boolean; m: MediaMeta }) {
   const st = useEditor.getState;
   const pts = rampPoints(clip);
   const ramp = clip.speedRamp as { points: RampPoint[]; preset?: string } | null | undefined;
@@ -226,6 +227,7 @@ function SpeedSection({ clip, update, D, isMain }: { clip: Clip; update: Update;
       </div>
       {clip.reverse && <div className="faint" style={{ fontSize: 11 }}>The preview plays reversed clips silently; the export plays the sound backwards.</div>}
       <div className="faint" style={{ fontSize: 11 }}>Source used: {(clip.outPoint - clip.inPoint).toFixed(2)} s (avg {((clip.outPoint - clip.inPoint) / Math.max(1e-6, motionDuration(clip))).toFixed(2)}×).</div>
+      {!frozen && <SlowMoControls clip={clip} m={m} update={update} />}
     </div>
   );
 }

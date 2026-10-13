@@ -130,7 +130,12 @@ def op_segment(ctx: Ctx, args: dict) -> dict:
     return segment(ctx, args)
 
 
-OPS = {"probe": op_probe, "matte": op_matte, "segment": op_segment}
+def op_interp(ctx: Ctx, args: dict) -> dict:
+    from interp import interp
+    return interp(ctx, args)
+
+
+OPS = {"probe": op_probe, "matte": op_matte, "segment": op_segment, "interp": op_interp}
 
 
 def main() -> None:

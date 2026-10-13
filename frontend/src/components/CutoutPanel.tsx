@@ -113,6 +113,9 @@ export default function CutoutPanel({ clip, trackType, m }: { clip: Clip; trackT
                 onChange={(v, f) => set((c) => void (c.refine.grow = v), f)} />
               <Slider label="Feather" value={cut.refine.feather} min={0} max={8} step={0.5} fmt={(v) => `${v} px`}
                 title="Softens the edge" onChange={(v, f) => set((c) => void (c.refine.feather = v), f)} />
+              <Slider label="Motion blur" value={cut.refine.motion} min={0} max={1} step={0.05} fmt={(v) => (v ? `${Math.round(v * 100)}%` : "off")}
+                title="Fast-moving arms and hands are blurred and come out see-through, so text behind shows through them. This makes them solid (only where the picture moves fast)."
+                onChange={(v, f) => set((c) => void (c.refine.motion = v), f)} />
               <label className="row fl-check" title="Edges follow the full-resolution picture (hair, fingers). Changing it analyses again.">
                 <input type="checkbox" checked={cut.refine.detail} onChange={(e) => set((c) => void (c.refine.detail = e.target.checked))} />
                 Hair detail

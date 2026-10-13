@@ -4,7 +4,7 @@ import type { Filter, MediaMeta, Project } from "../types";
 
 export type CutoutBgType = "keep" | "blur" | "color" | "image" | "video" | "remove";
 
-export interface CutoutRefine { smooth: number; grow: number; feather: number; detail: boolean }
+export interface CutoutRefine { smooth: number; grow: number; feather: number; detail: boolean; motion: number }
 export interface CutoutBackground { type: CutoutBgType; color: string; blur: number; mediaId: string | null }
 export interface GlowPulse { mode: "none" | "beat" | "rate"; amount: number; rate: number }
 export interface CutoutGlow { enabled: boolean; color: string; width: number; softness: number; opacity: number; pulse: GlowPulse }
@@ -30,7 +30,7 @@ export const CUTOUT_DEFAULT: Cutout = {
   mode: "person",
   points: [],
   model: "auto",
-  refine: { smooth: 0.5, grow: 0, feather: 1, detail: true },
+  refine: { smooth: 0.5, grow: 0, feather: 1, detail: true, motion: 0.8 },
   background: { type: "keep", color: "#14141a", blur: 24, mediaId: null },
   subjectFilters: [],
   backgroundFilters: [],

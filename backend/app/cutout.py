@@ -36,6 +36,7 @@ from .media import load_meta, original_path
 router = APIRouter(prefix="/api/cutout", tags=["cutout"])
 
 RAW_VERSION = 1
+MOTION_DEFAULT = 0.8  # motion-blur fix strength (0 = off); measured in Phase 10, see _smoothed
 DERIVE_VERSION = 2  # 2: flow-aligned 3-frame median before the blend
 MARGIN = 1.0  # seconds of footage analysed beyond what the clip shows (transition handles, small trims)
 PREVIEW_MAX = config.PROXY_MAX_SIDE
@@ -47,7 +48,7 @@ DEFAULT = {
     "mode": "person",  # "person" (automatic matting) or "object" (click to select, SAM 2)
     "points": [],  # object mode: [{"t": source s, "x": 0..1, "y": 0..1, "label": 1 | 0}]
     "model": "auto",  # "auto" = Settings > default person model
-    "refine": {"smooth": 0.5, "grow": 0.0, "feather": 1.0, "detail": True},
+    "refine": {"smooth": 0.5, "grow": 0.0, "feather": 1.0, "detail": True, "motion": 0.8},
     "background": {"type": "keep", "color": "#14141a", "blur": 24.0, "mediaId": None},
     "subjectFilters": [],
     "backgroundFilters": [],
@@ -117,7 +118,8 @@ def _raw_stem(model: str, detail: bool, k0: int, k1: int) -> str:
 
 def refine_key(refine: dict) -> str:
     r = {"smooth": round(float(refine.get("smooth", 0.5)), 3), "grow": round(float(refine.get("grow", 0)), 2),
-         "feather": round(float(refine.get("feather", 1)), 2), "v": DERIVE_VERSION}
+         "feather": round(float(refine.get("feather", 1)), 2), "v": DERIVE_VERSION,
+         "motion": round(float(refine.get("motion", MOTION_DEFAULT)), 2)}
     return hashlib.sha1(json.dumps(r, sort_keys=True).encode()).hexdigest()[:10]
 
 
@@ -277,7 +279,9 @@ def derive(meta: dict, raw: dict, refine: dict, ctx: JobContext | None, p0: floa
     tm = TONEMAP if meta.get("hdr") else ""
     ss = f"{max(0.0, (k0 - 0.25) / fps):.6f}"
     # stage 1 (slow, cached per smoothing strength): temporal smoothing of the raw matte
-    base = _smoothed(meta, raw, smooth, ctx, p0, p0 + (p1 - p0) * 0.75) if smooth > 0 else d / raw["file"]
+    motion = max(0.0, min(1.0, float(refine.get("motion", MOTION_DEFAULT))))
+    base = (_smoothed(meta, raw, smooth, ctx, p0, p0 + (p1 - p0) * 0.75, motion) if (smooth > 0 or motion > 0)
+            else d / raw["file"])
     p0 = p0 + (p1 - p0) * 0.75 if smooth > 0 else p0
     # stage 2 (fast): grow/shrink + feather, the full-size matte for the export and the preview proxy
     dec_a = _ff(["-i", str(base), "-f", "rawvideo", "-pix_fmt", "gray", "-"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -326,7 +330,23 @@ def derive(meta: dict, raw: dict, refine: dict, ctx: JobContext | None, p0: floa
     return info
 
 
-def _smoothed(meta: dict, raw: dict, smooth: float, ctx: JobContext | None, p0: float, p1: float) -> Path:
+def motion_fix(a: np.ndarray, speed: np.ndarray, strength: float, w: int) -> np.ndarray:
+    """Motion-blurred limbs come out semi-transparent, so text behind the subject shows through them. Where
+    the picture moves fast (optical flow, full-size px per frame), make soft matte pixels more solid and grow
+    the edge a little; still areas are left exactly as they are."""
+    import cv2
+    s0, s1 = 0.006 * w, 0.02 * w  # moving 0.6 % .. 2 % of the width per frame
+    wgt = np.clip((speed - s0) / (s1 - s0), 0, 1).astype(np.float32) * np.float32(strength)
+    if not wgt.any():
+        return a
+    r = max(1, int(round(0.004 * w)))
+    wgt = cv2.dilate(wgt, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))  # reach the blurred fringe
+    grown = cv2.dilate(a, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+    target = np.maximum(np.clip(a / 0.5, 0, 1), grown)  # soft pixels made solid, the edge grown by r
+    return a + wgt * (target - a)
+
+
+def _smoothed(meta: dict, raw: dict, smooth: float, ctx: JobContext | None, p0: float, p1: float, motion: float = 0.0) -> Path:
     """The raw matte smoothed over time (cached per strength): flow-aligned, so real motion isn't smeared.
       1) median of (previous, this, next) warped onto this frame: removes one-frame pops (a stray object
          flashing in, a limb flashing out) without lag;
@@ -334,7 +354,8 @@ def _smoothed(meta: dict, raw: dict, smooth: float, ctx: JobContext | None, p0: 
          disagree (real change, occlusion, flow error) the new frame wins."""
     import cv2
     d = cut_dir(meta["id"])
-    out = d / (raw["file"].rsplit(".", 1)[0] + f"__s{DERIVE_VERSION}_{int(round(smooth * 100))}.mkv")
+    out = d / (raw["file"].rsplit(".", 1)[0] + f"__s{DERIVE_VERSION}_{int(round(smooth * 100))}"
+               + (f"_m{int(round(motion * 100))}" if motion > 0 else "") + ".mkv")
     if out.exists():
         return out
     w, h, fps, k0, n = raw["width"], raw["height"], raw["fps"], raw["k0"], raw["k1"] - raw["k0"]
@@ -361,9 +382,14 @@ def _smoothed(meta: dict, raw: dict, smooth: float, ctx: JobContext | None, p0: 
         gb = dec_f.stdout.read(fw * fh)
         return np.frombuffer(gb, np.uint8).reshape(fh, fw) if len(gb) == fw * fh else last
 
+    last_speed = [None]
+
     def warp(img, g_to, g_from):
         """img (in g_from's frame) moved onto g_to's frame with DIS flow at 1/4 size."""
         flow = dis.calc(g_to, g_from, None)
+        if motion > 0 and img is prev_s:  # how fast each pixel moves (full-size px per frame), for the motion fix
+            last_speed[0] = cv2.resize(np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2) * np.float32(w / fw), (w, h),
+                                       interpolation=cv2.INTER_LINEAR)
         flow = cv2.resize(flow, (w, h), interpolation=cv2.INTER_LINEAR) * np.float32(w / fw)
         return cv2.remap(img, gx + flow[..., 0], gy + flow[..., 1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
@@ -390,6 +416,8 @@ def _smoothed(meta: dict, raw: dict, smooth: float, ctx: JobContext | None, p0: 
                 prev_g = g_cur
             prev_s = a
             cur, g_cur = nxt, g_nxt
+            if motion > 0 and last_speed[0] is not None:
+                a = motion_fix(a, last_speed[0], motion, w)
             enc.stdin.write((np.clip(a, 0, 1) * 255 + 0.5).astype(np.uint8).tobytes())
             if ctx and k % 10 == 0:
                 ctx.progress(p0 + (p1 - p0) * k / n, "Smoothing edges over time…")

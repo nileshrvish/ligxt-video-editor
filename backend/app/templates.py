@@ -272,7 +272,10 @@ def from_project(project: Project, name: str, *, category: str = "Beat sync", ta
                       "keyframes": kfb,
                       "speed": cd.get("speed", 1), "transitionOut": None,
                       "audio": {"muted": bool(cd.get("muted")), "volume": cd.get("volume", 1)} if m.get("type") == "video" else None,
-                      "cutout": template_cutout(cd.get("cutout"))})
+                      "cutout": template_cutout(cd.get("cutout")),
+                      # slow motion: a ramp (e.g. "Slow-mo into the drop") and its quality, for video clips
+                      "speedRamp": copy.deepcopy(cd.get("speedRamp")) if m.get("type") == "video" else None,
+                      "slowmo": copy.deepcopy(cd.get("slowmo")) if m.get("type") == "video" else None})
         id2slot[c.id] = len(slots) - 1
     if dropped:
         notes.append(f"Per-photo colour corrections (shots {', '.join(map(str, dropped))}) are not stored: "
@@ -708,6 +711,7 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
     slot_clips = []
     muted_videos = 0
     cutout_shots = 0
+    slow_shots = 0
     for i, s in enumerate(t["slots"]):
         mid = assign[i]
         m = metas[mid]
@@ -728,7 +732,28 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
                 cd["muted"] = True
                 muted_videos += 1
             dur = float(m.get("duration") or 0)
-            if dur >= D:
+            ramp = s.get("speedRamp")
+            sp = float(s.get("speed") or 1)
+            if s.get("slowmo"):
+                cd["slowmo"] = copy.deepcopy(s["slowmo"])
+            if ramp or abs(sp - 1) > 1e-6:
+                # the template's slow motion: the footage needed is the slot length x the average speed
+                probe = {"inPoint": 0.0, "outPoint": 1.0, "speed": sp, "speedRamp": copy.deepcopy(ramp)}
+                avg = 1.0 / max(1e-6, M.clip_duration(probe))
+                need = D * avg
+                if need <= dur:
+                    cd["speed"], cd["speedRamp"] = sp, copy.deepcopy(ramp)
+                    cd["inPoint"] = round(min(1.0, (dur - need) / 2), 4)
+                    cd["outPoint"] = round(cd["inPoint"] + need, 6)
+                    slow_shots += 1
+                    continue_slot = True
+                else:
+                    continue_slot = False
+            else:
+                continue_slot = False
+            if continue_slot:
+                pass
+            elif dur >= D:
                 cd["inPoint"] = round(min(1.0, (dur - D) / 2), 4)
                 cd["outPoint"] = round(cd["inPoint"] + D, 4)
             else:
@@ -742,6 +767,9 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
         clip = Clip.model_validate(cd)
         main.clips.append(clip)
         slot_clips.append(clip)
+    if slow_shots:
+        report.append(f"Slow motion on {slow_shots} video shot(s) as in the template (speed ramps keep their timing; "
+                      "AI smooth frames are made on export or when the preview needs them).")
     if cutout_shots:
         behind = sum(1 for x in t.get("texts") or [] if (x.get("spec") or {}).get("behindSubject"))
         report.append(f"Cutout on {cutout_shots} shot(s){' with text behind the subject' if behind else ''}: the subjects are analysed "

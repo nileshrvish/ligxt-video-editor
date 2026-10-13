@@ -199,6 +199,11 @@ def unused_media():
         if mid in used:
             continue
         try:
+            if json.loads(mj.read_text(encoding="utf-8")).get("derivedFrom"):
+                continue  # a slow-motion render registered for Cutout: a cache of its source, not an import
+        except (OSError, ValueError):
+            pass
+        try:
             m = json.loads(mj.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             m = {"name": mid}

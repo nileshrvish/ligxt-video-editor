@@ -29,6 +29,7 @@ from .models import Clip, Project
 from .projects import load_project
 from . import cutout as CU
 from . import cutout_render as CR
+from . import slowmo as SM
 from . import layers as LY
 from . import motion as MO
 from . import text as TX
@@ -288,16 +289,49 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     cut_infos: dict[str, dict] = {}
     cut_missing: list[str] = []
 
-    def cut_info(c: Clip, before: float = 0.0, after: float = 0.0) -> dict | None:
-        """The clip's cutout settings + matte file (analysis queued as a plan task if not cached)."""
-        cut = cut_of(c)
+    slow_infos: dict[str, dict | None] = {}
+    slow_missing: list[str] = []
+
+    def slow_info(c: Clip, before: float = 0.0, after: float = 0.0) -> dict | None:
+        """A clip with Frame blending / AI smooth slow motion: its retimed video (made by a plan task if not
+        cached) and the speed-1 clip that plays it (see slowmo.py)."""
         m = metas.get(c.mediaId or "") or {}
-        if not cut or m.get("type") not in ("video", "image"):
+        cd = c.model_dump()
+        if not SM.needs_retime(cd, m, fps):
             return None
         key = f"{c.id}|{before:.4f}|{after:.4f}"
+        if key in slow_infos:
+            return slow_infos[key]
+        sp = SM.frame_plan(cd, m, c.start, fps, before, after)
+        k = SM.plan_key(m, sp, "full")
+        path = SM.slow_dir(m["id"]) / f"{k}_full.mp4"
+        pseudo = {"id": SM.derived_id(m, k), "name": f"{m['name']} (slow motion)", "type": "video", "fps": fps,
+                  "duration": len(sp["frames"]) / fps, "width": m.get("width"), "height": m.get("height"), "hasAudio": False,
+                  "hdr": False, "file": f"cache/{m['id']}/slowmo/{k}_full.mp4", "derivedFrom": m["id"]}
+        if not SM.lookup(m, sp, "full"):
+            if sp["quality"] == "ai":
+                slow_missing.append(f"'{m['name']}'")
+
+            def task(wd, ctx=None, m=m, sp=sp):
+                inf = SM.render(m, sp, "full", ctx)
+                SM.derived_meta(m, sp, inf)
+            task.wants_ctx = True  # type: ignore[attr-defined]
+            plan_tasks.append((f"Slow motion: {m['name'][:24]}", task))
+        info = {"path": path, "meta": pseudo, "cd": SM.retimed_clip(cd, sp, c.start)}
+        slow_infos[key] = info
+        return info
+
+    def cut_info(c: Clip, before: float = 0.0, after: float = 0.0, mo: dict | None = None, cdo: dict | None = None) -> dict | None:
+        """The clip's cutout settings + matte file (analysis queued as a plan task if not cached). mo/cdo: the
+        retimed video and clip when the clip uses slow motion (the matte is made from those frames)."""
+        cut = cut_of(c)
+        m = mo or metas.get(c.mediaId or "") or {}
+        if not cut or m.get("type") not in ("video", "image"):
+            return None
+        key = f"{c.id}|{before:.4f}|{after:.4f}|{m.get('id')}"
         if key in cut_infos:
             return cut_infos[key]
-        span = None if m["type"] == "image" else CU.needed_span(c.model_dump(), before, after)
+        span = None if m["type"] == "image" else CU.needed_span(cdo or c.model_dump(), before, after)
         info = CR.matte_info(m, cut, span)
         info["cut"] = cut
         if not info["ready"]:
@@ -371,16 +405,24 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         D = clip_duration(c)
         hdr = TONEMAP + "," if m.get("hdr") else ""
         audible = m.get("hasAudio") and m["type"] == "video" and not c.muted and not main_muted and c.volume > 0
-        raw, raw_a = LY.source_raw(g, cd, m, str(original_path(m)), tau0, nf, fps, frame_at_fn(c, tau0),
-                                   want_audio=bool(audible), tonemap=hdr)
+        h_in, h_out = incoming.get(c.id, 0.0), plans[c.id].half if c.id in plans else 0.0
+        si = slow_info(c, h_in, h_out)
+        if si:
+            # slow motion with blending / AI frames: the retimed video plays at 1x; the sound is the original's
+            raw, _ = LY.source_raw(g, si["cd"], si["meta"], str(si["path"]), tau0, nf, fps, frame_at_fn(c, tau0), want_audio=False)
+            _, raw_a = LY.source_raw(g, cd, m, str(original_path(m)), tau0, nf, fps, frame_at_fn(c, tau0),
+                                     want_audio=bool(audible), want_video=False) if audible else (None, None)
+        else:
+            raw, raw_a = LY.source_raw(g, cd, m, str(original_path(m)), tau0, nf, fps, frame_at_fn(c, tau0),
+                                       want_audio=bool(audible), tonemap=hdr)
         mode = c.fit or default_fit
         extend = bool(c.extend) and m["type"] == "image"
-        ci = cut_info(c, incoming.get(c.id, 0.0), plans[c.id].half if c.id in plans else 0.0)
+        ci = cut_info(c, h_in, h_out, si["meta"] if si else None, si["cd"] if si else None)
         M = None
         if ci:
             # the picture and its matte take the same path (layers.motion_layer): they line up exactly
             src_w, src_h = int(m.get("width") or W), int(m.get("height") or H)
-            mraw = CR.matte_raw(cx, cd, ci, tau0, nf, frame_at_fn(c, tau0))
+            mraw = CR.matte_raw(cx, si["cd"] if si else cd, ci, tau0, nf, frame_at_fn(c, tau0))
             M = CR.canvas_matte(cx, mraw, cd, src_w, src_h, mode == "fill", tau0, nf, extend=extend)
         if MO.has_motion(cd) or extend or ci:
             src_w, src_h = int(m.get("width") or W), int(m.get("height") or H)
@@ -624,8 +666,14 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
             offset = frame_of(a_t) / fps
             hdr = TONEMAP + "," if m.get("hdr") else ""
             audible = m["type"] == "video" and m.get("hasAudio") and not t.muted and not c.muted and c.volume > 0
-            raw, raw_a = LY.source_raw(g, cd, m, str(original_path(m)), tau0, nf, fps, frame_at_fn(c, tau0),
-                                       want_audio=bool(audible), tonemap=hdr)
+            si = slow_info(c)
+            if si:
+                raw, _ = LY.source_raw(g, si["cd"], si["meta"], str(si["path"]), tau0, nf, fps, frame_at_fn(c, tau0), want_audio=False)
+                _, raw_a = LY.source_raw(g, cd, m, str(original_path(m)), tau0, nf, fps, frame_at_fn(c, tau0),
+                                         want_audio=bool(audible), want_video=False) if audible else (None, None)
+            else:
+                raw, raw_a = LY.source_raw(g, cd, m, str(original_path(m)), tau0, nf, fps, frame_at_fn(c, tau0),
+                                           want_audio=bool(audible), tonemap=hdr)
             src_w, src_h = int(m.get("width") or W), int(m.get("height") or H)
             fill = (c.fit or "fit") == "fill"
             rect = None
@@ -645,9 +693,9 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
             else:
                 lay = LY.motion_layer(g, raw, cd, src_w, src_h, fill, W, H, tau0, fps, nf, workdir, rect=rect)
             layers_ = [lay]
-            ci = cut_info(c)
+            ci = cut_info(c, mo=si["meta"] if si else None, cdo=si["cd"] if si else None)
             if ci:
-                mraw = CR.matte_raw(cx, cd, ci, tau0, nf, frame_at_fn(c, tau0))
+                mraw = CR.matte_raw(cx, si["cd"] if si else cd, ci, tau0, nf, frame_at_fn(c, tau0))
                 if rect is not None:  # graded at its fitted size: the matte gets the same crop + scale
                     x0_, y0_, cw_, ch_ = LY.rounded_rect(int(m.get("width") or W), int(m.get("height") or H),
                                                          c.transform.crop.model_dump(), fill, W, H)
@@ -720,9 +768,12 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         g.add(f"[{v_base}]format=yuv420p[vout]")
     g.add(f"[{a_final}]atrim=duration={_f(dur)},asetpts=PTS-STARTPTS[aout]")
 
-    if cut_missing:
+    if cut_missing or slow_missing:
         from .ai_models import ai_python
         if ai_python() is None:
+            if slow_missing:
+                raise RenderError(f"AI smooth slow motion is set for {', '.join(slow_missing[:3])}, but the AI tools are not "
+                                  "installed. Run setup.ps1 and restart Ligxt, or set Slow-mo quality to Frame blending.")
             raise RenderError(CR.needs_analysis_message(cut_missing))
     venc, abr = encoder_args(ex, preset, mode, fps)
 

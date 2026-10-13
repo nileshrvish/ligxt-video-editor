@@ -1077,7 +1077,8 @@
    "smooth": 0.5,
    "grow": 0.0,
    "feather": 1.0,
-   "detail": true
+   "detail": true,
+   "motion": 0.8
   },
   "background": {
    "type": "keep",

@@ -20,6 +20,8 @@ import { extension, onExtLoaded } from "./extend";
 import { cutoutAsset, onCutoutAssets, type CutoutAsset } from "../cutout/assets";
 import { cutoutOn, glowLevels, normalizeCutout, pulseAt, timelineBeats, type Cutout } from "../cutout/model";
 import { CutoutRenderer } from "./cutout";
+import { onSlowAssets, slowAsset, type SlowInfo } from "../slowmo/assets";
+import { needsRetime } from "../slowmo/model";
 
 const PREROLL = 1.5; // seconds: load + seek upcoming clips ahead of time
 const KEEP_IDLE_MS = 4000; // drop elements unused for this long
@@ -41,6 +43,9 @@ interface Active {
   preroll: boolean;
   /** Cutout on and its matte ready: the clip plays the picture|matte preview proxy. */
   cut?: { asset: CutoutAsset; cfg: Cutout };
+  /** Slow motion with blending / AI frames: the retimed video (plays at 1x; the original element keeps
+   *  only the sound). With Cutout too, `cut` is the cutout of the full-resolution retimed video. */
+  slow?: { preview: SlowInfo; full?: SlowInfo };
 }
 
 interface Slot {
@@ -108,7 +113,8 @@ export class PreviewEngine {
     });
     this.compare = useEditor.getState().compare;
     this.fx.onAsset = () => (this.dirty = true);
-    this.unsubAssets = [onTextAssets(() => (this.dirty = true)), onExtLoaded(() => (this.dirty = true)), onCutoutAssets(() => (this.dirty = true))];
+    this.unsubAssets = [onTextAssets(() => (this.dirty = true)), onExtLoaded(() => (this.dirty = true)), onCutoutAssets(() => (this.dirty = true)),
+      onSlowAssets(() => (this.dirty = true))];
     this.raf = requestAnimationFrame(this.tick);
   }
 
@@ -273,7 +279,25 @@ export class PreviewEngine {
         const audible = m.hasAudio && m.type !== "image" && !track.muted && !clip.muted && clip.volume > 0;
         if (!visual && !audible) continue;
         const a: Active = { clip, track, media: m, isMain, visual, audible, preroll };
-        if (visual && cutoutOn(clip) && (track.type === "video" || track.type === "overlay")) {
+        const fps = p.settings.fps;
+        if (visual && needsRetime(clip, m, fps)) {
+          const before = inTr?.half ?? 0, after = outTr?.half ?? 0;
+          const sa = slowAsset(clip, m, fps, before, after, "preview");
+          if (sa?.status === "ready" && sa.info) a.slow = { preview: sa.info };
+          if (a.slow && cutoutOn(clip)) {
+            // Cutout on a slowed clip: the matte is made from the retimed (full-resolution) frames
+            const fa = slowAsset(clip, m, fps, before, after, "full");
+            if (fa?.status === "ready" && fa.info?.mediaId) {
+              a.slow.full = fa.info;
+              const D = clipDuration(clip);
+              const rc = { ...clip, mediaId: fa.info.mediaId, inPoint: fa.info.offset, outPoint: fa.info.offset + D, speed: 1,
+                speedRamp: null, reverse: false, freezeFrame: null } as Clip;
+              const pm = { ...m, id: fa.info.mediaId, fps, duration: fa.info.frames / fps, hasAudio: false } as MediaMeta;
+              const asset = cutoutAsset(rc, pm);
+              if (asset?.status === "ready" && asset.info) a.cut = { asset, cfg: normalizeCutout(clip.cutout) };
+            }
+          }
+        } else if (visual && cutoutOn(clip) && (track.type === "video" || track.type === "overlay")) {
           const asset = cutoutAsset(clip, m);
           if (asset?.status === "ready" && asset.info) a.cut = { asset, cfg: normalizeCutout(clip.cutout) };
         }
@@ -322,10 +346,17 @@ export class PreviewEngine {
   }
 
   // ------------------------------------------------------------ media elements
-  private slotFor(a: Active, now: number): Slot | null {
+  /** The element showing a clip's picture: the retimed video for slowed clips, else the clip's own. */
+  private videoEl(a: Active): HTMLVideoElement | undefined {
+    return this.slots.get(a.slow ? "v:" + a.clip.id : a.clip.id)?.el as HTMLVideoElement | undefined;
+  }
+
+  private slotFor(a: Active, now: number, retimed = false): Slot | null {
     if (a.media.type === "image") return null;
-    let slot = this.slots.get(a.clip.id);
-    const url = a.cut && !a.cut.asset.info!.image ? a.cut.asset.info!.preview : mediaUrl(a.media);
+    const sk = retimed ? "v:" + a.clip.id : a.clip.id;
+    let slot = this.slots.get(sk);
+    const url = retimed ? (a.cut && !a.cut.asset.info!.image ? a.cut.asset.info!.preview : a.slow!.preview.url)
+      : a.cut && !a.slow && !a.cut.asset.info!.image ? a.cut.asset.info!.preview : mediaUrl(a.media);
     if (slot && slot.url !== url) {
       this.dispose(slot);
       slot = undefined;
@@ -341,8 +372,9 @@ export class PreviewEngine {
       el.addEventListener("loadeddata", mark);
       el.addEventListener("canplay", mark);
       slot = { el, url, gain: null, lastUsed: now };
-      this.connect(slot);
-      this.slots.set(a.clip.id, slot);
+      if (retimed) el.muted = true; // pictures only: the sound comes from the clip's own element
+      else this.connect(slot);
+      this.slots.set(sk, slot);
     }
     slot.lastUsed = now;
     return slot;
@@ -396,6 +428,20 @@ export class PreviewEngine {
     for (const a of active) if (a.cut) this.syncCutBg(a, t, playing, rate, fps, now);
     for (const a of active) {
       if (a.adjust || a.text) continue;
+      if (a.slow) {
+        // the retimed video: clip time + its offset, at 1x (speed, ramps, reverse and freeze are baked in)
+        const vs = this.slotFor(a, now, true);
+        if (vs) {
+          const tau = a.preroll ? -this.incomingHalf(a) : t - a.clip.start;
+          const sl = a.slow;
+          let want = tau + (sl.full && a.cut ? sl.full.offset : sl.preview.offset);
+          const ci = a.cut?.asset.info;
+          if (ci && sl.full) want = Math.max(0, Math.min(want - ci.offset, ci.frames / ci.fps - 0.04));
+          else want = Math.max(0, Math.min(want, sl.preview.frames / sl.preview.fps - 0.04));
+          this.drive(vs.el, want, 1, playing && rate > 0 && !a.preroll, rate, fps);
+        }
+        if (!a.audible) continue; // the original element is only needed for the sound
+      }
       const slot = this.slotFor(a, now);
       if (!slot) continue;
       const el = slot.el;
@@ -407,24 +453,13 @@ export class PreviewEngine {
       const speed = st.speed;
       // Past the footage (transition freeze): hold the first/last frame.
       if (a.media.type !== "image") want = Math.max(0, Math.min(want, Math.max(0, a.media.duration - 0.04)));
-      const ci = a.cut?.asset.info;
+      const ci = a.slow ? undefined : a.cut?.asset.info;
       if (ci && !ci.image) want = Math.max(0, Math.min(want - ci.offset, ci.frames / ci.fps - 0.04)); // window file
       // Reversed and frozen clips can't be played by a media element: they're stepped frame by
       // frame (seeked) and silent in the preview. The export plays reversed audio.
       const stepped = speed <= 0;
       const forward = playing && rate > 0 && !a.preroll && !stepped;
-      if (forward) {
-        el.playbackRate = Math.max(0.0625, Math.min(16, speed * rate));
-        if (el.paused) {
-          if (Math.abs(el.currentTime - want) > 0.05) el.currentTime = want;
-          el.play().catch(() => void 0);
-        } else if (Math.abs(el.currentTime - want) > 0.25 * Math.max(1, rate)) {
-          el.currentTime = want; // drifted: resync to the master clock
-        }
-      } else {
-        if (!el.paused) el.pause();
-        if (!el.seeking && Math.abs(el.currentTime - want) > 0.5 / fps) el.currentTime = want;
-      }
+      this.drive(el, want, speed, forward, rate, fps);
       if (slot.gain && this.audio) {
         const audible = a.audible && forward && rate <= MAX_AUDIBLE_RATE;
         const inFootage = want > 0.001 && want < a.media.duration - 0.05;
@@ -438,6 +473,22 @@ export class PreviewEngine {
           : 0;
         slot.gain.gain.setTargetAtTime(g, this.audio.currentTime, 0.015);
       }
+    }
+  }
+
+  /** Slave a media element to the clock: play at speed x rate, resync when it drifts; seek when paused. */
+  private drive(el: HTMLVideoElement | HTMLAudioElement, want: number, speed: number, forward: boolean, rate: number, fps: number) {
+    if (forward) {
+      el.playbackRate = Math.max(0.0625, Math.min(16, speed * rate));
+      if (el.paused) {
+        if (Math.abs(el.currentTime - want) > 0.05) el.currentTime = want;
+        el.play().catch(() => void 0);
+      } else if (Math.abs(el.currentTime - want) > 0.25 * Math.max(1, rate)) {
+        el.currentTime = want; // drifted: resync to the master clock
+      }
+    } else {
+      if (!el.paused) el.pause();
+      if (!el.seeking && Math.abs(el.currentTime - want) > 0.5 / fps) el.currentTime = want;
     }
   }
 
@@ -482,7 +533,7 @@ export class PreviewEngine {
         const img = this.image(a.media);
         return img.complete && img.naturalWidth ? img : null;
       }
-      const el = this.slots.get(a.clip.id)?.el as HTMLVideoElement | undefined;
+      const el = this.videoEl(a);
       return el && el.readyState >= 2 ? el : null;
     });
     if (sources.some((s) => !s)) return false;
