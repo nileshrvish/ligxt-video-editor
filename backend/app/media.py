@@ -9,6 +9,8 @@ Layout on disk:
 """
 from __future__ import annotations
 
+from .fsutil import replace_retry
+
 import json
 import re
 import shutil
@@ -67,7 +69,7 @@ def save_meta(meta: dict) -> None:
         p = media_dir(meta["id"]) / "meta.json"
         tmp = p.with_suffix(".tmp")
         tmp.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        tmp.replace(p)
+        replace_retry(tmp, p)
 
 
 def update_meta(mid: str, **changes) -> dict:
@@ -77,7 +79,7 @@ def update_meta(mid: str, **changes) -> dict:
         meta.update(changes)
         tmp = p.with_suffix(".tmp")
         tmp.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        tmp.replace(p)
+        replace_retry(tmp, p)
         return meta
 
 
@@ -423,3 +425,25 @@ def detect_beats(mid: str):
 
     job = jobs.submit("beats", f"Beat detection: {meta['name']}", run, queue="media", ref={"mediaId": mid})
     return {"jobId": job.id}
+
+
+def import_local(src: Path, name: str, extra: dict | None = None, *, process: bool = True, mid: str | None = None) -> dict:
+    """Copy a local file (template music, placeholders, bundled effects) into the media store.
+    Runs the normal processing (thumbnail, waveform, proxy, faces) as a background job if `process`."""
+    ext = src.suffix.lower()
+    mid = mid or uuid.uuid4().hex[:12]
+    d = media_dir(mid)
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / f"original{ext}"
+    shutil.copyfile(src, dest)
+    info = probe(str(dest))
+    mtype = media_type_for(ext, info)
+    if mtype == "image":
+        info["duration"] = 0
+    meta = {"id": mid, "name": name, "type": mtype, "file": f"media/{mid}/original{ext}", "size": dest.stat().st_size,
+            "imported": time.time(), **info, "thumbnail": None, "waveform": None, "proxy": None,
+            "proxyStatus": "none", "status": "processing" if process else "ready", "error": None, **(extra or {})}
+    save_meta(meta)
+    if process:
+        queue_processing(meta)
+    return meta

@@ -38,7 +38,8 @@ Stop it with **Ctrl+C** in the PowerShell window.
 | `cache\`     | Thumbnails, low-res proxies, waveforms (safe to delete; use **Rebuild proxy** to regenerate) |
 | `projects\`  | `projects\<id>\project.json` and `autosave\` (last 10 autosaves, every 30 s) |
 | `exports\`   | Rendered videos |
-| `templates\` | Style templates (Phase 7) |
+| `templates\` | Your saved templates (one folder each: template.json, preview, thumbnail) |
+| `templates_builtin\` | The three starter templates (synthesized CC0 music, placeholder previews) |
 | `fonts\`     | Bundled fonts (OFL / Apache 2.0, see `fonts\README.md`) |
 | `models\`    | Face detector; the captions speech model is downloaded into `models\whisper` |
 | `sfx\`       | Bundled sound effects (whoosh, fast whoosh, hit, riser), synthesised, CC0 |
@@ -91,6 +92,14 @@ Timeline mouse: drag a clip to move it (or to another track of the same kind), d
 - **Speed**: 0.25-4x (pitch preserved), speed ramps (presets + a curve you can drag; double-click adds/removes points), reverse, freeze frame.
 - **Audio**: volume keyframes, fade in/out on any clip, Detach audio, auto-duck (the `duck` button on a music track lowers it under speech), `+ SFX` adds a sound effect whose peak lands on the playhead or a whoosh on every transition.
 - **Selective colour** (Colour & effects): keep one colour (hue, range, softness, or pick it from the preview) and turn the rest black and white.
+
+## Templates
+
+- **Save as template** (editor top bar) stores a project's structure and style, never your photos or videos: shot slots with lengths in beats, sections (from markers named Breakdown, Drop, Peak, Outro...), transitions, motion per shot (zoom / pan / punch-ins / shake), grade (adjustment layers, presets, LUTs, selective colour), text styles and animations with placeholder text, beat captions, sound effects and the export preset. Your song is bundled only if it is license-safe (CC0 / own / synthesized); otherwise the template asks for a song.
+- **Gallery** (Home screen): cards with thumbnail, animated preview on hover, length, media slots, tags; search and categories; Use, export as .zip, duplicate, rename/tags/new preview, delete; Import .zip. Three built-in starters: Quick beat montage, Photo slideshow with Ken Burns, Before/after reveal.
+- **Use template**: 1) drop photos/videos (their order fills the shots; drag to swap; fewer files are reused, extra files replace repeated shots), 2) pick a song (beats are detected; choose the start point, it snaps to a beat), 3) fill in the hook title, beat captions and closing line, 4) create. The result is a normal, fully editable project, plus a report of what was adapted.
+- What adapts automatically: every cut, transition, caption word and sound effect is re-timed to the new song's beats; zooms are re-aimed at each photo's face; faces are kept out of the Reels header, caption area and buttons (photos get an extended canvas when they have to move); landscape or off-centre photos are reframed onto the face; shots are colour-matched to each other; text moves off faces.
+- **.zip files** contain `template.json` (with a `version`; older versions are upgraded on import) and a license-safe song if there is one. No personal media.
 
 ## Text and captions
 

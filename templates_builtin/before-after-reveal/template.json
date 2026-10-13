@@ -1,0 +1,395 @@
+{
+ "version": 1,
+ "id": "before-after-reveal",
+ "name": "Before/after reveal",
+ "description": "A 'before' shot, a wipe on the beat with a whoosh and a hit, then the 'after' in full colour.",
+ "category": "Reveal",
+ "tags": [
+  "before",
+  "after",
+  "transformation",
+  "reveal"
+ ],
+ "created": 1791883925.239085,
+ "updated": 1791883925.239085,
+ "bpm": 100.0,
+ "settings": {
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "aspect": "9:16",
+  "background": {
+   "mode": "fill",
+   "color": "#000000"
+  },
+  "sampleRate": 48000
+ },
+ "refs": 2,
+ "refHints": [
+  {
+   "ref": 0,
+   "kind": "image"
+  },
+  {
+   "ref": 1,
+   "kind": "image"
+  }
+ ],
+ "slots": [
+  {
+   "index": 0,
+   "ref": 0,
+   "startBeat": 0.0,
+   "lengthBeats": 8.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [
+    {
+     "type": "preset",
+     "name": "faded",
+     "intensity": 0.8,
+     "params": {
+      "skinProtect": true
+     },
+     "enabled": true
+    }
+   ],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.0,
+      "easing": "inout"
+     },
+     {
+      "beat": 8,
+      "value": 1.08,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": {
+    "type": "wiperight",
+    "beats": 2.0
+   },
+   "section": "Before"
+  },
+  {
+   "index": 1,
+   "ref": 1,
+   "startBeat": 8.0,
+   "lengthBeats": 10.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [
+    {
+     "type": "preset",
+     "name": "vivid",
+     "intensity": 0.6,
+     "params": {
+      "skinProtect": true
+     },
+     "enabled": true
+    }
+   ],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.12,
+      "easing": "inout"
+     },
+     {
+      "beat": 10,
+      "value": 1.0,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": null,
+   "section": "After"
+  }
+ ],
+ "layers": [
+  {
+   "track": "Flashes",
+   "startBeat": 9.0,
+   "lengthBeats": 0.25,
+   "filters": [
+    {
+     "type": "adjust",
+     "name": "",
+     "intensity": 1,
+     "params": {
+      "exposure": 0.7
+     },
+     "enabled": true
+    }
+   ],
+   "opacity": 1.0,
+   "keyframes": {},
+   "hidden": false
+  }
+ ],
+ "texts": [
+  {
+   "key": "label1",
+   "role": "text",
+   "placeholder": "BEFORE",
+   "track": "Titles",
+   "startBeat": 0.0,
+   "lengthBeats": 7.0,
+   "spec": {
+    "font": "Anton-Regular",
+    "size": 120,
+    "uppercase": true,
+    "color": "#ffffff",
+    "lineHeight": 1.05,
+    "outline": {
+     "width": 7,
+     "color": "#000000"
+    }
+   },
+   "words": null,
+   "transform": {
+    "x": 0,
+    "y": -600,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false,
+    "crop": {
+     "left": 0,
+     "top": 0,
+     "right": 0,
+     "bottom": 0
+    }
+   },
+   "keyframes": {}
+  },
+  {
+   "key": "label2",
+   "role": "text",
+   "placeholder": "AFTER",
+   "track": "Titles",
+   "startBeat": 9.0,
+   "lengthBeats": 9.0,
+   "spec": {
+    "font": "Anton-Regular",
+    "size": 150,
+    "uppercase": true,
+    "color": "#fff4e2",
+    "letterSpacing": 2,
+    "lineHeight": 1.0,
+    "maxWidth": 860,
+    "shadow": {
+     "enabled": true,
+     "color": "#1a0d05",
+     "opacity": 0.6,
+     "blur": 14,
+     "x": 0,
+     "y": 6
+    },
+    "animIn": {
+     "type": "pop",
+     "duration": 0.35,
+     "easing": "punch"
+    },
+    "animOut": {
+     "type": "fade",
+     "duration": 0.25,
+     "easing": "in"
+    }
+   },
+   "words": null,
+   "transform": {
+    "x": 0,
+    "y": -600,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false,
+    "crop": {
+     "left": 0,
+     "top": 0,
+     "right": 0,
+     "bottom": 0
+    }
+   },
+   "keyframes": {}
+  },
+  {
+   "key": "hook1",
+   "role": "hook",
+   "placeholder": "wait for it",
+   "track": "Titles",
+   "startBeat": 1.0,
+   "lengthBeats": 5.0,
+   "spec": {
+    "font": "Poppins-SemiBold",
+    "size": 44,
+    "color": "#ffffff",
+    "align": "center",
+    "maxWidth": 640,
+    "box": {
+     "enabled": true,
+     "color": "#000000",
+     "opacity": 0.55,
+     "padX": 22,
+     "padY": 12,
+     "radius": 10,
+     "mode": "lines"
+    },
+    "animIn": {
+     "type": "slide",
+     "duration": 0.4,
+     "easing": "out",
+     "direction": "right",
+     "distance": 60
+    },
+    "animOut": {
+     "type": "fade",
+     "duration": 0.3,
+     "easing": "in"
+    }
+   },
+   "words": null,
+   "transform": {
+    "x": 0,
+    "y": 430,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false,
+    "crop": {
+     "left": 0,
+     "top": 0,
+     "right": 0,
+     "bottom": 0
+    }
+   },
+   "keyframes": {}
+  }
+ ],
+ "sfx": [
+  {
+   "sfx": "whoosh",
+   "beat": 8.0,
+   "volume": 0.35,
+   "track": "SFX"
+  },
+  {
+   "sfx": "hit",
+   "beat": 9.0,
+   "volume": 0.3,
+   "track": "SFX"
+  }
+ ],
+ "sections": [
+  {
+   "name": "Before",
+   "startBeat": 0,
+   "endBeat": 8
+  },
+  {
+   "name": "After",
+   "startBeat": 8,
+   "endBeat": 18
+  }
+ ],
+ "trackOrder": [
+  {
+   "type": "video",
+   "name": "Main video"
+  },
+  {
+   "type": "overlay",
+   "name": "Grade"
+  },
+  {
+   "type": "overlay",
+   "name": "Flashes"
+  },
+  {
+   "type": "text",
+   "name": "Titles"
+  },
+  {
+   "type": "audio",
+   "name": "SFX"
+  },
+  {
+   "type": "music",
+   "name": "Music"
+  }
+ ],
+ "export": {
+  "preset": "instagram",
+  "fps": 30
+ },
+ "music": {
+  "volume": 0.9,
+  "fadeInBeats": 0,
+  "fadeOutBeats": 3,
+  "autoDuck": null,
+  "file": "music.mp3",
+  "license": "synthesized",
+  "beats": [
+   0.0,
+   0.6,
+   1.2,
+   1.7999999999999998,
+   2.4,
+   3.0,
+   3.5999999999999996,
+   4.2,
+   4.8,
+   5.3999999999999995,
+   6.0,
+   6.6,
+   7.199999999999999,
+   7.8,
+   8.4,
+   9.0,
+   9.6,
+   10.2,
+   10.799999999999999,
+   11.4,
+   12.0,
+   12.6,
+   13.2,
+   13.799999999999999,
+   14.399999999999999,
+   15.0,
+   15.6,
+   16.2,
+   16.8
+  ],
+  "name": "Ligxt beat 100 BPM (synthesized, CC0)"
+ }
+}

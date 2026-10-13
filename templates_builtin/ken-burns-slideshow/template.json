@@ -1,0 +1,693 @@
+{
+ "version": 1,
+ "id": "ken-burns-slideshow",
+ "name": "Photo slideshow with Ken Burns",
+ "description": "Slow, eased Ken Burns zooms and pans with soft crossfades and a warm film look.",
+ "category": "Slideshow",
+ "tags": [
+  "photos",
+  "calm",
+  "ken burns",
+  "memories"
+ ],
+ "created": 1791883909.5558228,
+ "updated": 1791883909.5558228,
+ "bpm": 90.0,
+ "settings": {
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "aspect": "9:16",
+  "background": {
+   "mode": "fill",
+   "color": "#000000"
+  },
+  "sampleRate": 48000
+ },
+ "refs": 8,
+ "refHints": [
+  {
+   "ref": 0,
+   "kind": "image"
+  },
+  {
+   "ref": 1,
+   "kind": "image"
+  },
+  {
+   "ref": 2,
+   "kind": "image"
+  },
+  {
+   "ref": 3,
+   "kind": "image"
+  },
+  {
+   "ref": 4,
+   "kind": "image"
+  },
+  {
+   "ref": 5,
+   "kind": "image"
+  },
+  {
+   "ref": 6,
+   "kind": "image"
+  },
+  {
+   "ref": 7,
+   "kind": "image"
+  }
+ ],
+ "slots": [
+  {
+   "index": 0,
+   "ref": 0,
+   "startBeat": 0.0,
+   "lengthBeats": 4.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.0,
+      "easing": "inout"
+     },
+     {
+      "beat": 4,
+      "value": 1.12,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": {
+    "type": "fade",
+    "beats": 1.0
+   },
+   "section": "Opening"
+  },
+  {
+   "index": 1,
+   "ref": 1,
+   "startBeat": 4.0,
+   "lengthBeats": 4.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.12,
+      "easing": "linear"
+     }
+    ],
+    "x": [
+     {
+      "beat": 0,
+      "value": 50,
+      "easing": "inout"
+     },
+     {
+      "beat": 4,
+      "value": -50,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": {
+    "type": "fade",
+    "beats": 1.0
+   },
+   "section": "Photos"
+  },
+  {
+   "index": 2,
+   "ref": 2,
+   "startBeat": 8.0,
+   "lengthBeats": 4.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.12,
+      "easing": "inout"
+     },
+     {
+      "beat": 4,
+      "value": 1.0,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": {
+    "type": "fade",
+    "beats": 1.0
+   },
+   "section": "Photos"
+  },
+  {
+   "index": 3,
+   "ref": 3,
+   "startBeat": 12.0,
+   "lengthBeats": 4.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.12,
+      "easing": "linear"
+     }
+    ],
+    "x": [
+     {
+      "beat": 0,
+      "value": -50,
+      "easing": "inout"
+     },
+     {
+      "beat": 4,
+      "value": 50,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": {
+    "type": "fade",
+    "beats": 1.0
+   },
+   "section": "Photos"
+  },
+  {
+   "index": 4,
+   "ref": 4,
+   "startBeat": 16.0,
+   "lengthBeats": 4.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.0,
+      "easing": "inout"
+     },
+     {
+      "beat": 4,
+      "value": 1.1,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": {
+    "type": "fade",
+    "beats": 1.0
+   },
+   "section": "Photos"
+  },
+  {
+   "index": 5,
+   "ref": 5,
+   "startBeat": 20.0,
+   "lengthBeats": 4.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.12,
+      "easing": "linear"
+     }
+    ],
+    "y": [
+     {
+      "beat": 0,
+      "value": 60,
+      "easing": "inout"
+     },
+     {
+      "beat": 4,
+      "value": -60,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": {
+    "type": "fade",
+    "beats": 1.0
+   },
+   "section": "Photos"
+  },
+  {
+   "index": 6,
+   "ref": 6,
+   "startBeat": 24.0,
+   "lengthBeats": 4.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.1,
+      "easing": "inout"
+     },
+     {
+      "beat": 4,
+      "value": 1.0,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": {
+    "type": "fade",
+    "beats": 1.0
+   },
+   "section": "Photos"
+  },
+  {
+   "index": 7,
+   "ref": 7,
+   "startBeat": 28.0,
+   "lengthBeats": 4.0,
+   "kind": "image",
+   "fit": null,
+   "filters": [],
+   "extend": false,
+   "transform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false
+   },
+   "keyframes": {
+    "scale": [
+     {
+      "beat": 0,
+      "value": 1.12,
+      "easing": "linear"
+     }
+    ],
+    "x": [
+     {
+      "beat": 0,
+      "value": 45,
+      "easing": "inout"
+     },
+     {
+      "beat": 4,
+      "value": -45,
+      "easing": "linear"
+     }
+    ]
+   },
+   "speed": 1,
+   "transitionOut": null,
+   "section": "Photos"
+  }
+ ],
+ "layers": [
+  {
+   "track": "Grade",
+   "startBeat": 0.0,
+   "lengthBeats": 32.0,
+   "filters": [
+    {
+     "type": "preset",
+     "name": "warmfilm",
+     "intensity": 0.5,
+     "params": {
+      "skinProtect": true
+     },
+     "enabled": true
+    },
+    {
+     "type": "effect",
+     "name": "grain",
+     "intensity": 1,
+     "params": {
+      "amount": 0.1,
+      "size": 1.5
+     },
+     "enabled": true
+    },
+    {
+     "type": "effect",
+     "name": "vignette",
+     "intensity": 1,
+     "params": {
+      "amount": 0.3,
+      "feather": 0.5
+     },
+     "enabled": true
+    }
+   ],
+   "opacity": 1.0,
+   "keyframes": {},
+   "hidden": false
+  }
+ ],
+ "texts": [
+  {
+   "key": "hook1",
+   "role": "hook",
+   "placeholder": "Our summer",
+   "track": "Titles",
+   "startBeat": 0.0,
+   "lengthBeats": 6.0,
+   "spec": {
+    "font": "DMSerifDisplay-Italic",
+    "size": 120,
+    "color": "#f3e2c0",
+    "letterSpacing": 4,
+    "lineHeight": 1.05,
+    "shadow": {
+     "enabled": true,
+     "color": "#ff9a3c",
+     "opacity": 0.45,
+     "blur": 18,
+     "x": 0,
+     "y": 0
+    },
+    "animIn": {
+     "type": "fade",
+     "duration": 0.8,
+     "easing": "inout"
+    },
+    "animOut": {
+     "type": "fade",
+     "duration": 0.6,
+     "easing": "inout"
+    }
+   },
+   "words": null,
+   "transform": {
+    "x": 0,
+    "y": -560,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false,
+    "crop": {
+     "left": 0,
+     "top": 0,
+     "right": 0,
+     "bottom": 0
+    }
+   },
+   "keyframes": {}
+  },
+  {
+   "key": "caption1",
+   "role": "text",
+   "placeholder": "a place \u00b7 a date",
+   "track": "Titles",
+   "startBeat": 5.0,
+   "lengthBeats": 7.0,
+   "spec": {
+    "font": "Poppins-SemiBold",
+    "size": 44,
+    "color": "#ffffff",
+    "align": "left",
+    "maxWidth": 640,
+    "box": {
+     "enabled": true,
+     "color": "#000000",
+     "opacity": 0.55,
+     "padX": 22,
+     "padY": 12,
+     "radius": 10,
+     "mode": "lines"
+    },
+    "animIn": {
+     "type": "slide",
+     "duration": 0.4,
+     "easing": "out",
+     "direction": "right",
+     "distance": 60
+    },
+    "animOut": {
+     "type": "fade",
+     "duration": 0.3,
+     "easing": "in"
+    }
+   },
+   "words": null,
+   "transform": {
+    "x": -120,
+    "y": 430,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false,
+    "crop": {
+     "left": 0,
+     "top": 0,
+     "right": 0,
+     "bottom": 0
+    }
+   },
+   "keyframes": {}
+  },
+  {
+   "key": "outro1",
+   "role": "outro",
+   "placeholder": "thanks for watching",
+   "track": "Titles",
+   "startBeat": 28.0,
+   "lengthBeats": 4.0,
+   "spec": {
+    "font": "DMSerifDisplay-Italic",
+    "size": 80,
+    "color": "#f3e2c0",
+    "letterSpacing": 4,
+    "lineHeight": 1.05,
+    "shadow": {
+     "enabled": true,
+     "color": "#ff9a3c",
+     "opacity": 0.45,
+     "blur": 18,
+     "x": 0,
+     "y": 0
+    },
+    "animIn": {
+     "type": "fade",
+     "duration": 0.8,
+     "easing": "inout"
+    },
+    "animOut": {
+     "type": "fade",
+     "duration": 0.6,
+     "easing": "inout"
+    }
+   },
+   "words": null,
+   "transform": {
+    "x": 0,
+    "y": -560,
+    "scale": 1,
+    "rotation": 0,
+    "opacity": 1,
+    "flipH": false,
+    "flipV": false,
+    "crop": {
+     "left": 0,
+     "top": 0,
+     "right": 0,
+     "bottom": 0
+    }
+   },
+   "keyframes": {}
+  }
+ ],
+ "sfx": [],
+ "sections": [
+  {
+   "name": "Opening",
+   "startBeat": 0,
+   "endBeat": 4
+  },
+  {
+   "name": "Photos",
+   "startBeat": 4,
+   "endBeat": 32
+  }
+ ],
+ "trackOrder": [
+  {
+   "type": "video",
+   "name": "Main video"
+  },
+  {
+   "type": "overlay",
+   "name": "Grade"
+  },
+  {
+   "type": "overlay",
+   "name": "Flashes"
+  },
+  {
+   "type": "text",
+   "name": "Titles"
+  },
+  {
+   "type": "audio",
+   "name": "SFX"
+  },
+  {
+   "type": "music",
+   "name": "Music"
+  }
+ ],
+ "export": {
+  "preset": "reels",
+  "fps": 30
+ },
+ "music": {
+  "volume": 0.9,
+  "fadeInBeats": 0,
+  "fadeOutBeats": 4,
+  "autoDuck": null,
+  "file": "music.mp3",
+  "license": "synthesized",
+  "beats": [
+   0.0,
+   0.6666666666666666,
+   1.3333333333333333,
+   2.0,
+   2.6666666666666665,
+   3.333333333333333,
+   4.0,
+   4.666666666666666,
+   5.333333333333333,
+   6.0,
+   6.666666666666666,
+   7.333333333333333,
+   8.0,
+   8.666666666666666,
+   9.333333333333332,
+   10.0,
+   10.666666666666666,
+   11.333333333333332,
+   12.0,
+   12.666666666666666,
+   13.333333333333332,
+   14.0,
+   14.666666666666666,
+   15.333333333333332,
+   16.0,
+   16.666666666666664,
+   17.333333333333332,
+   18.0,
+   18.666666666666664,
+   19.333333333333332,
+   20.0,
+   20.666666666666664,
+   21.333333333333332,
+   22.0,
+   22.666666666666664,
+   23.333333333333332,
+   24.0,
+   24.666666666666664,
+   25.333333333333332,
+   26.0,
+   26.666666666666664,
+   27.333333333333332
+  ],
+  "name": "Ligxt beat 90 BPM (synthesized, CC0)"
+ }
+}

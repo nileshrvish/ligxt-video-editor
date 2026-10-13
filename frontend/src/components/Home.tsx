@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { navigate } from "../router";
+import TemplatesGallery from "./Templates";
 import { toastError, useApp } from "../store/app";
 import type { ProjectSummary } from "../types";
 import { fmtDuration, timeAgo } from "../util";
@@ -122,10 +123,10 @@ export default function Home() {
             <b>New project</b>
             <span>Start from an empty timeline (9:16, 1:1, 4:5 or 16:9)</span>
           </button>
-          <button className="big-card" disabled title="Style templates arrive in Phase 7">
+          <button className="big-card" onClick={() => document.getElementById("templates")?.scrollIntoView({ behavior: "smooth" })}>
             <div className="ic"><Icon name="sparkles" size={18} /></div>
             <b>Templates</b>
-            <span>Reusable styles and cut timing (coming in Phase 7)</span>
+            <span>Start from a style: drop in photos, pick a song, done</span>
           </button>
         </div>
 
@@ -165,6 +166,7 @@ export default function Home() {
             ))}
           </div>
         )}
+        <TemplatesGallery />
       </div>
       {showNew && <NewProjectDialog onClose={() => setShowNew(false)} />}
     </div>

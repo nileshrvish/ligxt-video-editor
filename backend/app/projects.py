@@ -1,6 +1,8 @@
 """Project storage: save/load, recent list, autosave (keeps the last N)."""
 from __future__ import annotations
 
+from .fsutil import replace_retry
+
 import json
 import re
 import shutil
@@ -31,7 +33,7 @@ def _write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    replace_retry(tmp, path)
 
 
 def load_project(pid: str) -> Project:

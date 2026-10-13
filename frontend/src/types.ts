@@ -119,3 +119,11 @@ export interface ProjectSummary {
   id: string; name: string; updated: number; created?: number; aspect?: string;
   clips?: number; duration?: number; mediaCount?: number; thumbnail?: string | null; damaged?: boolean;
 }
+
+export interface TemplateSummary {
+  id: string; name: string; description: string; category: string; tags: string[]; builtin: boolean; version: number;
+  bpm: number; beats: number; duration: number; slots: number; mediaSlots: number;
+  texts: { key: string; role: string; placeholder: string }[];
+  music: { bundled: boolean; license: string | null };
+  thumb: string | null; preview: string | null; updated: number;
+}

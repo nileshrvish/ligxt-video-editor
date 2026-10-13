@@ -6,6 +6,7 @@ import { useEditor } from "../store/editor";
 import { projectDuration } from "../util";
 import { Modal } from "./Common";
 import ExportDialog, { openFolderAfterExport } from "./ExportDialog";
+import SaveTemplateDialog from "./SaveTemplateDialog";
 import { api } from "../api";
 import { Icon, Logo } from "./Icons";
 import MediaLibrary from "./MediaLibrary";
@@ -200,6 +201,7 @@ export default function Editor({ projectId }: { projectId: string }) {
 }
 
 function TopBar({ onExport, onHelp }: { onExport: () => void; onHelp: () => void }) {
+  const [saveTpl, setSaveTpl] = useState(false);
   const name = useEditor((s) => s.project!.name);
   const saveState = useEditor((s) => s.saveState);
   const lastSaved = useEditor((s) => s.lastSaved);
@@ -277,6 +279,10 @@ function TopBar({ onExport, onHelp }: { onExport: () => void; onHelp: () => void
       >
         <Icon name="save" /> Save
       </button>
+      <button className="btn ghost" onClick={() => setSaveTpl(true)} title="Save this project's structure and style as a reusable template">
+        <Icon name="sparkles" /> Save as template
+      </button>
+      {saveTpl && <SaveTemplateDialog onClose={() => setSaveTpl(false)} />}
       <button className="btn primary" onClick={onExport} title="Export (Ctrl+E)">
         <Icon name="export" /> Export
       </button>

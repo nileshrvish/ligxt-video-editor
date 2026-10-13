@@ -5,6 +5,7 @@ media/*
 cache/*
 exports/*
 projects/*
+templates/*
 !*/.gitkeep
 __pycache__/
 *.pyc

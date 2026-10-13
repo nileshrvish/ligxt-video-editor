@@ -1,4 +1,4 @@
-import type { Job, MediaMeta, Project, ProjectSummary } from "./types";
+import type { Job, MediaMeta, Project, ProjectSummary, TemplateSummary } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -62,6 +62,23 @@ export const api = {
   exportCover: (p: Project, time: number, text: Record<string, unknown> | null, hideText: boolean) =>
     req<{ jobId: string }>("POST", `/api/projects/${p.id}/cover`, { project: p, time, text, hideText }),
   detectFaces: (id: string) => req<{ jobId: string }>("POST", `/api/media/${id}/faces`),
+  templates: (q = "", category = "") =>
+    req<{ templates: TemplateSummary[]; categories: string[] }>("GET", `/api/templates?q=${encodeURIComponent(q)}&category=${encodeURIComponent(category)}`),
+  template: (id: string) => req<TemplateSummary & { template: Record<string, any> }>("GET", `/api/templates/${id}`),
+  saveTemplate: (body: { project: Project; name: string; category: string; tags: string[]; description: string; exportPreset: string | null; previewStart: number | null }) =>
+    req<{ template: TemplateSummary; notes: string[]; previewJobId: string }>("POST", "/api/templates", body),
+  patchTemplate: (id: string, body: { name?: string; category?: string; tags?: string[]; description?: string }) => req<TemplateSummary>("PATCH", `/api/templates/${id}`, body),
+  duplicateTemplate: (id: string) => req<TemplateSummary>("POST", `/api/templates/${id}/duplicate`),
+  deleteTemplate: (id: string) => req<{ ok: boolean }>("DELETE", `/api/templates/${id}`),
+  templatePreview: (id: string, body: { source: "placeholder" | "project"; projectId?: string; start?: number }) =>
+    req<{ jobId: string }>("POST", `/api/templates/${id}/preview`, body),
+  importTemplate: async (file: File) => {
+    const r = await fetch("/api/templates/import", { method: "POST", headers: { "Content-Type": "application/zip" }, body: file });
+    if (!r.ok) throw await parseError(r);
+    return (await r.json()) as { template: TemplateSummary; previewJobId: string | null };
+  },
+  generateFromTemplate: (id: string, body: { media: string[]; music: string | null; musicStart: number; texts: Record<string, string>; name: string }) =>
+    req<{ jobId: string }>("POST", `/api/templates/${id}/generate`, body),
   sfxLibrary: () => req<{ sfx: { id: string; name: string; peak: number }[] }>("GET", "/api/media/sfx/library"),
   importSfx: (id: string) => req<{ media: MediaMeta; jobId: string }>("POST", `/api/media/sfx/${id}/import`),
 
