@@ -6,6 +6,8 @@ import type { MediaMeta } from "../types";
 import { fmtTime, projectDuration } from "../util";
 import { Icon } from "./Icons";
 import TransformHandles from "./TransformHandles";
+import TextEditBox from "./TextEditBox";
+import { SafetyBadge, SafetyBoxes } from "./SafeAreas";
 
 /** URL the browser should play for a media item: proxy when ready, else the original. */
 export function playableUrl(m: MediaMeta): string {
@@ -88,6 +90,14 @@ function ProgramMonitor() {
   const [scopes, setScopes] = useState(() => readFlag("ligxt.scopes", false));
   const compare = useEditor((s) => s.compare);
   const colorPick = useEditor((s) => s.colorPick);
+  const editingText = useEditor((s) => s.editingText);
+  useEffect(() => {
+    const e = engineRef.current;
+    if (e) {
+      e.editingTextId = editingText;
+      e.invalidate();
+    }
+  }, [editingText]);
   const pick = (e: React.MouseEvent) => {
     const cv = canvasRef.current;
     const fn = useEditor.getState().colorPick;
@@ -169,10 +179,12 @@ function ProgramMonitor() {
           <div className="canvas-frame" style={{ width: fw, height: fh }}>
             <canvas ref={canvasRef} style={{ width: fw, height: fh, display: "block" }} />
             {safe && <SafeAreas reels={aspect === "9:16"} />}
+            {safe && <SafetyBoxes fw={fw} />}
             {buffering && <span className="preview-label" style={{ top: 8, left: 8 }}>Loading…</span>}
             {shuttleLabel && <span className="shuttle-badge">{shuttleLabel}</span>}
             {compare != null && <CompareDivider value={compare} width={fw} />}
-            {compare == null && !colorPick && <TransformHandles fw={fw} fh={fh} />}
+            {compare == null && !colorPick && !editingText && <TransformHandles fw={fw} fh={fh} />}
+            {editingText && <TextEditBox fw={fw} />}
             {colorPick && <div className="pv-pick" title="Click a colour to keep" onClick={pick} />}
           </div>
         )}
@@ -211,6 +223,7 @@ function ProgramMonitor() {
         <button className={`btn ghost sm toggle ${scopes ? "on" : ""}`} title="Colour scopes: histogram and waveform" onClick={toggleScopes}>
           Scopes
         </button>
+        <SafetyBadge onShow={() => { if (!safe) toggleSafe(); }} />
         <button className={`btn ghost sm toggle ${safe ? "on" : ""}`} onClick={toggleSafe} title="Show the areas Instagram's buttons and captions cover">
           Safe areas
         </button>

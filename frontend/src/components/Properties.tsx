@@ -7,6 +7,8 @@ import { mainTransitionPlans, TRANSITION_GROUPS, transitionLabel, UI_MIN } from 
 import type { Aspect, Clip, FitMode, MediaMeta } from "../types";
 import { ASPECTS, clipDuration, fmtBytes, fmtDuration } from "../util";
 import FiltersPanel from "./FiltersPanel";
+import TextPanel from "./TextPanel";
+import { SafetyNote } from "./SafeAreas";
 import MotionPanel, { PropSlider, useClipTime, useClipUpdate } from "./MotionPanel";
 import { Icon } from "./Icons";
 
@@ -80,6 +82,7 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
   const maxOut = m && m.type !== "image" ? m.duration : 3600;
   const isVisual = trackType === "video" || trackType === "overlay";
   if (clip.adjustment) return <AdjustmentProps clip={clip} trackId={trackId} />;
+  if (clip.text && trackType === "text") return <TextPanel clip={clip} />;
 
   return (
     <div className="props">
@@ -135,6 +138,13 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
               ))}
             </div>
           </div>
+          {m?.type === "image" && (
+            <label className="row fl-check" title="Fill around the photo with a blurred, colour-matched extension, so it can be moved or zoomed out without showing its edges">
+              <input type="checkbox" checked={!!clip.extend} onChange={(e) => update((c) => void (c.extend = e.target.checked))} />
+              Extend canvas (blurred, colour-matched fill around the photo)
+            </label>
+          )}
+          <SafetyNote clipId={clip.id} />
         </div>
       )}
 

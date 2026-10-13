@@ -25,6 +25,9 @@ from . import config
 from .config import AUDIO_EXT, CACHE_DIR, IMAGE_EXT, MEDIA_DIR, VIDEO_EXT
 from .ffmpeg_utils import CREATE_NO_WINDOW, FFmpegError, has_nvenc, probe, run_ffmpeg
 from .jobs import JobContext, jobs
+import logging
+
+log = logging.getLogger("ligxt.media")
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 _meta_lock = threading.Lock()
@@ -230,6 +233,13 @@ def process_media(mid: str):
             update_meta(mid, proxyStatus="error", status="error",
                         error="; ".join(errors + [f"Proxy: {e}"]))
             raise
+        if meta["type"] in ("image", "video"):
+            ctx.progress(0.99, "Finding faces")
+            try:
+                from .faces import detect
+                meta = update_meta(mid, faces=detect(meta))
+            except Exception as e:  # noqa: BLE001  (safe-area hints only; never fail the import)
+                log.warning("face detection failed for %s: %s", mid, e)
         meta = update_meta(mid, status="ready" if not errors else "warning", error="; ".join(errors) or None)
         ctx.message("Ready" if not errors else "Ready with warnings")
         return {"mediaId": mid}
@@ -359,6 +369,39 @@ def sfx_import(sid: str):
     save_meta(meta)
     job = queue_processing(meta)
     return {"media": meta, "jobId": job.id}
+
+
+@router.post("/{mid}/faces")
+def detect_faces(mid: str):
+    """Background job: (re)detect faces for the safe-area warnings."""
+    meta = load_meta(_valid_id(mid))
+    if not meta:
+        raise HTTPException(404, "Media not found.")
+    if meta.get("type") not in ("image", "video"):
+        raise HTTPException(400, "Only photos and videos have faces to find.")
+
+    def run(ctx: JobContext) -> dict:
+        from .faces import detect
+        res = detect(meta, lambda f: ctx.progress(f * 0.98, "Finding faces"))
+        update_meta(mid, faces=res)
+        n = max((len(f["boxes"]) for f in res["frames"]), default=0)
+        ctx.message(f"{n} face(s)" if n else "No faces found")
+        return {"mediaId": mid, "faces": n}
+
+    job = jobs.submit("faces", f"Faces: {meta['name']}", run, queue="media", ref={"mediaId": mid})
+    return {"jobId": job.id}
+
+
+@router.get("/{mid}/extended")
+def media_extended(mid: str):
+    """Photo extension image (blurred, colour-matched fill around the photo); built on first use."""
+    meta = load_meta(_valid_id(mid))
+    if not meta:
+        raise HTTPException(404, "Media not found.")
+    if meta.get("type") != "image":
+        raise HTTPException(400, "Only photos can be extended.")
+    from .extend import extended
+    return extended(meta)
 
 
 @router.post("/{mid}/beats")

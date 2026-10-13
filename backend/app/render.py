@@ -6,9 +6,11 @@ Range export only renders the clips that overlap the range.
 """
 from __future__ import annotations
 
+import json
 import math
 import re
 import shutil
+import subprocess
 import threading
 import time
 import uuid
@@ -27,6 +29,11 @@ from .models import Clip, Project
 from .projects import load_project
 from . import layers as LY
 from . import motion as MO
+from . import text as TX
+from .config import ROOT
+
+EXPORT_PRESETS = {p["id"]: p for p in json.loads((ROOT / "shared" / "export_presets.json").read_text(encoding="utf-8"))["presets"]}
+GRAIN_REDUCTION = 0.35  # "reduce grain for upload": grain effects at 35 % of their amount
 from .grade import TO_GBRP, grade_chain, needs_grade, ref_scale
 from .transitions import ALL_TYPES, WHIP_TYPES, TransitionPlan, plan_transition
 
@@ -158,6 +165,7 @@ class Plan:
     output: Path
     fps: float
     workdir: Path | None = None  # ffmpeg runs here (generated .cube LUTs are referenced by bare name)
+    tasks: list = field(default_factory=list)  # (label, fn(workdir)) to run before ffmpeg (text frames)
 
 
 def build_plan(project: Project, out_path: Path, *, mode: str = "final",
@@ -165,8 +173,14 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                workdir: Path | None = None) -> Plan:
     s = project.settings
     ex = project.export
-    W, H = int(ex.width or s.width), int(ex.height or s.height)
+    # Everything is composed on the project canvas (positions are project pixels) and scaled to the
+    # export size at the end; a different aspect ratio is letterboxed.
+    W, H = int(s.width), int(s.height)
     W, H = W - W % 2, H - H % 2
+    OW, OH = int(ex.width or W), int(ex.height or H)
+    OW, OH = OW - OW % 2, OH - OH % 2
+    preset = EXPORT_PRESETS.get(ex.preset) or EXPORT_PRESETS["custom"]
+    reduce_grain = preset.get("reduceGrain", False) if ex.reduceGrain is None else bool(ex.reduceGrain)
     bg = _color(s.background.color)
     default_fit = s.background.mode
 
@@ -205,7 +219,33 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     rs = ref_scale(W, H)
 
     def filt(c: Clip) -> list[dict]:
-        return [f.model_dump() for f in c.filters]
+        out = [f.model_dump() for f in c.filters]
+        if reduce_grain:
+            for f in out:
+                if f.get("type") == "effect" and f.get("name") == "grain":
+                    f["params"] = {**(f.get("params") or {}), "amount": float((f.get("params") or {}).get("amount", 0)) * GRAIN_REDUCTION}
+        return out
+
+    from . import extend as EXT
+    plan_tasks: list = []
+
+    def ext_layers(c: Clip, m: dict, raw: str, cd: dict, src_w: int, src_h: int, fill: bool, tau0: float, nf: int,
+                   rect=None) -> str:
+        """Photo extension: the extension image, then the whole photo on top (one canvas-size layer)."""
+        info = EXT.extended(m)
+        r = rect or LY.rounded_rect(src_w, src_h, c.transform.crop.model_dump(), fill, W, H)
+        fx, fy = info["fx"], info["fy"]
+        ext_box = (-fx * src_w, -fy * src_h, src_w * (1 + 2 * fx), src_h * (1 + 2 * fy))
+        idx = g.add_input(["-loop", "1", "-framerate", _f(fps), "-t", _f(nf / fps + 0.1), "-i", str(CACHE_DIR / m["id"] / info["file"])])
+        ev = g.label("ex")
+        g.add(f"[{idx}:v]setpts=PTS-STARTPTS,fps={_f(fps)},trim=end_frame={nf}[{ev}]")
+        lay_e = LY.motion_layer(g, ev, cd, src_w, src_h, fill, W, H, tau0, fps, nf, workdir, rect=r, extent=ext_box,
+                                img_map=(ext_box[0], ext_box[1], info["w"] / ext_box[2], info["h"] / ext_box[3]))
+        lay_p = LY.motion_layer(g, raw, cd, src_w, src_h, fill, W, H, tau0, fps, nf, workdir, rect=r,
+                                extent=(0, 0, src_w, src_h))
+        out = g.label("xl")
+        g.add(f"[{lay_e}][{lay_p}]overlay=0:0:format=auto:shortest=1[{out}]")
+        return out
 
     fps = ex.fps
     if fps == "source":
@@ -261,7 +301,8 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         raw, raw_a = LY.source_raw(g, cd, m, str(original_path(m)), tau0, nf, fps, frame_at_fn(c, tau0),
                                    want_audio=bool(audible), tonemap=hdr)
         mode = c.fit or default_fit
-        if MO.has_motion(cd):
+        extend = bool(c.extend) and m["type"] == "image"
+        if MO.has_motion(cd) or extend:
             src_w, src_h = int(m.get("width") or W), int(m.get("height") or H)
             if mode == "blur":
                 sp_a, sp_b = g.label("sa"), g.label("sb")
@@ -271,7 +312,10 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
             else:
                 back = g.label("bk")
                 g.add(f"color=c={bg}:s={W}x{H}:r={_f(fps)}:d={_f(seg + 0.1)},format=yuv420p,setsar=1[{back}]")
-            lay = LY.motion_layer(g, raw, cd, src_w, src_h, mode == "fill", W, H, tau0, fps, nf, workdir)
+            if extend:
+                lay = ext_layers(c, m, raw, cd, src_w, src_h, mode == "fill", tau0, nf)
+            else:
+                lay = LY.motion_layer(g, raw, cd, src_w, src_h, mode == "fill", W, H, tau0, fps, nf, workdir)
             fitted = g.label("mc")
             g.add(f"[{back}][{lay}]overlay=0:0:format=auto:shortest=1,format=yuv420p[{fitted}]")
         else:
@@ -379,10 +423,34 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     # Overlay tracks: composited over the main track in track order (later tracks on top).
     v_base = "vcat"
     extra: list[str] = []
+    text_n = 0
     for t in project.tracks:
-        if t.type != "overlay" or t.hidden:
+        if t.hidden or t.type not in ("overlay", "text"):
             continue
         for c in sorted(t.clips, key=lambda c: c.start):
+            if t.type == "text":
+                if not c.text or clip_duration(c) <= EPS:
+                    continue
+                a_t, b_t = max(c.start, r0), min(c.start + clip_duration(c), r1)
+                nf = frame_of(b_t) - frame_of(a_t)
+                if b_t - a_t <= EPS or nf <= 0:
+                    continue
+                cd = c.model_dump()
+                tau0 = a_t - c.start
+                prep = TX.prepare_clip(cd, tau0, nf, fps, W, H)
+                if prep is None:
+                    continue
+                prefix = f"txt{text_n}"
+                text_n += 1
+                plan_tasks.append((f"Text: {str(c.text.get('content', ''))[:24]}", lambda wd, prep=prep, prefix=prefix: TX.write_frames(prep, wd, prefix)))
+                offset = frame_of(a_t) / fps
+                idx = g.add_input(["-framerate", _f(fps), "-start_number", "0", "-i", f"{prefix}_%05d.png"])
+                ov, out = g.label("tx"), g.label("vb")
+                g.add(f"[{idx}:v]format=rgba,setpts=PTS-STARTPTS+{_f(offset)}/TB[{ov}]")
+                g.add(f"[{v_base}][{ov}]overlay={prep['x']}:{prep['y']}:enable='between(t,{_f(offset)},{_f(offset + nf / fps)})':"
+                      f"eof_action=pass:format=auto[{out}]")
+                v_base = out
+                continue
             if c.adjustment and not c.mediaId:
                 a_t, b_t = max(c.start, r0), min(c.start + clip_duration(c), r1)
                 if b_t - a_t <= EPS or not needs_grade(filt(c)):
@@ -444,7 +512,10 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                 raw = grade_chain(g, pre_g, filt(c), gw, gh, rs=rs, fps=fps, t0=a_t, f0=int(round(a_t * fps)),
                                   duration=seg, workdir=workdir, cubes=cubes)
                 src_w, src_h, rect = gw, gh, (0, 0, gw, gh)
-            lay = LY.motion_layer(g, raw, cd, src_w, src_h, fill, W, H, tau0, fps, nf, workdir, rect=rect)
+            if c.extend and m["type"] == "image" and rect is None:
+                lay = ext_layers(c, m, raw, cd, src_w, src_h, fill, tau0, nf)
+            else:
+                lay = LY.motion_layer(g, raw, cd, src_w, src_h, fill, W, H, tau0, fps, nf, workdir, rect=rect)
             ov = g.label("ov")
             g.add(f"[{lay}]setpts=PTS-STARTPTS+{_f(offset)}/TB[{ov}]")
             out = g.label("vb")
@@ -500,15 +571,14 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         a_final = "amix"
     else:
         a_final = "acat"
-    g.add(f"[{v_base}]format=yuv420p[vout]")
+    if (OW, OH) != (W, H):
+        g.add(f"[{v_base}]scale={OW}:{OH}:force_original_aspect_ratio=decrease:flags=lanczos,"
+              f"pad={OW}:{OH}:(ow-iw)/2:(oh-ih)/2:color={bg},setsar=1,format=yuv420p[vout]")
+    else:
+        g.add(f"[{v_base}]format=yuv420p[vout]")
     g.add(f"[{a_final}]atrim=duration={_f(dur)},asetpts=PTS-STARTPTS[aout]")
 
-    if mode == "draft" and has_nvenc():
-        venc = ["-c:v", "h264_nvenc", "-preset", "p2", "-rc", "vbr", "-cq", "23", "-b:v", "0"]
-    elif mode == "draft":
-        venc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
-    else:
-        venc = ["-c:v", "libx264", "-preset", "slow", "-crf", "18", "-profile:v", "high"]
+    venc, abr = encoder_args(ex, preset, mode, fps)
 
     script = ";\n".join(g.lines)
     args: list[str] = []
@@ -517,9 +587,38 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     args += ["-/filter_complex", "{SCRIPT}", "-map", "[vout]", "-map", "[aout]",
              *venc, "-pix_fmt", "yuv420p", "-r", _f(fps),
              "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
-             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+             "-c:a", "aac", "-b:a", f"{abr}k", "-ar", "48000", "-ac", "2",
              "-t", _f(dur), "-movflags", "+faststart", str(out_path)]
-    return Plan(args=args, filter_script=script, duration=dur, output=out_path, fps=fps, workdir=workdir)
+    return Plan(args=args, filter_script=script, duration=dur, output=out_path, fps=fps, workdir=workdir, tasks=plan_tasks)
+
+
+def video_quality(ex, preset: dict) -> dict:
+    v = dict(preset.get("video") or {"kind": "crf", "crf": 18})
+    if ex.video:
+        v.update(ex.video)
+    return v
+
+
+def encoder_args(ex, preset: dict, mode: str, fps: float) -> tuple[list[str], int]:
+    """Video encoder arguments and the audio bitrate (kbps) for the export settings."""
+    abr = int(ex.audioKbps or preset.get("audioKbps") or 192)
+    if mode == "draft":
+        if has_nvenc():
+            return ["-c:v", "h264_nvenc", "-preset", "p2", "-rc", "vbr", "-cq", "23", "-b:v", "0"], abr
+        return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"], abr
+    v = video_quality(ex, preset)
+    args = ["-c:v", "libx264", "-preset", str(v.get("preset", "slow")), "-profile:v", str(v.get("profile", "high"))]
+    if v.get("level"):
+        args += ["-level:v", str(v["level"])]
+    if v.get("kind") == "bitrate":
+        kb = int(v.get("kbps", 12000))
+        args += ["-b:v", f"{kb}k", "-maxrate", f"{int(v.get('maxKbps', kb * 4 // 3))}k",
+                 "-bufsize", f"{int(v.get('bufKbps', kb * 2))}k"]
+    else:
+        args += ["-crf", _f(float(v.get("crf", 18)))]
+    if v.get("gop"):
+        args += ["-g", str(int(v["gop"])), "-keyint_min", str(max(1, int(v["gop"]) // 2))]
+    return args, abr
 
 
 _names_lock = threading.Lock()
@@ -583,6 +682,16 @@ def sync_check(path: Path, expected: float, fps: float) -> dict:
             f"Audio/video length mismatch: video {v:.2f}s, audio {a:.2f}s, expected {expected:.2f}s."}
 
 
+def run_tasks(plan: Plan, rdir: Path, ctx: JobContext | None = None) -> None:
+    """Pre-render steps of a plan (text frames), in the job so the request returns at once."""
+    for i, (label, fn) in enumerate(plan.tasks):
+        if ctx:
+            if ctx.cancelled():
+                raise RenderError("Cancelled")
+            ctx.progress(0.0, f"Preparing {label} ({i + 1}/{len(plan.tasks)})")
+        fn(rdir)
+
+
 def run_export(project: Project, mode: str, range_start: float | None, range_end: float | None):
     out = _export_name(project, mode)
     workdir = CACHE_DIR / "_render" / uuid.uuid4().hex[:12]
@@ -593,6 +702,7 @@ def run_export(project: Project, mode: str, range_start: float | None, range_end
         rdir.mkdir(parents=True, exist_ok=True)
         script_path = rdir / f"{ctx.job.id}.txt"
         script_path.write_text(plan.filter_script, encoding="utf-8")
+        run_tasks(plan, rdir, ctx)
         args = [str(script_path) if a == "{SCRIPT}" else a for a in plan.args]
         ctx.progress(0.0, "Rendering")
         tmp = plan.output.with_name(plan.output.stem + ".part.mp4")
@@ -647,3 +757,127 @@ def preview_graph(pid: str, body: ExportBody):
     except RenderError as e:
         raise HTTPException(400, str(e)) from e
     return {"args": plan.args, "filter": plan.filter_script, "duration": plan.duration}
+
+
+# ---------------------------------------------------------------- size estimate, cover image
+def _render_range(project: Project, start: float, end: float, out: Path, ctx: JobContext | None = None) -> Plan:
+    workdir = CACHE_DIR / "_render" / uuid.uuid4().hex[:12]
+    plan = build_plan(project, out, mode="final", range_start=start, range_end=end, workdir=workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    try:
+        (workdir / "graph.txt").write_text(plan.filter_script, encoding="utf-8")
+        run_tasks(plan, workdir, None)
+        args = [str(workdir / "graph.txt") if a == "{SCRIPT}" else a for a in plan.args]
+        run_ffmpeg(args, plan.duration, lambda p: None, (ctx.cancelled if ctx else (lambda: False)),
+                   (ctx.set_process if ctx else (lambda p: None)), cwd=str(workdir))
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    return plan
+
+
+def estimate_size(project: Project, ctx: JobContext | None = None) -> dict:
+    """Expected file size of a final export: exact-ish for bitrate presets, else from 3 one-second samples."""
+    ex = project.export
+    preset = EXPORT_PRESETS.get(ex.preset) or EXPORT_PRESETS["custom"]
+    total = project_duration(project)
+    r = ex.range
+    dur = (min(total, r.end) - max(0.0, r.start)) if r else total
+    v = video_quality(ex, preset)
+    abr = int(ex.audioKbps or preset.get("audioKbps") or 192)
+    if v.get("kind") == "bitrate":
+        return {"bytes": int((int(v.get("kbps", 12000)) + abr) * 1000 / 8 * dur * 1.01), "method": "bitrate", "duration": round(dur, 3)}
+    s0 = max(0.0, r.start) if r else 0.0
+    n = 3 if dur > 3 else 1
+    seg = min(1.0, dur / n)
+    sizes = []
+    tmpdir = CACHE_DIR / "_render" / f"est_{uuid.uuid4().hex[:8]}"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    try:
+        for i in range(n):
+            a = s0 + (dur - seg) * ((i + 0.5) / n)
+            out = tmpdir / f"s{i}.mp4"
+            if ctx:
+                ctx.progress(i / n, f"Sampling {i + 1}/{n}")
+            _render_range(project, a, a + seg, out, ctx)
+            sizes.append(out.stat().st_size)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    per_sec = sum(sizes) / (seg * n)
+    return {"bytes": int(per_sec * dur), "method": "sampled", "duration": round(dur, 3), "samples": n}
+
+
+def project_duration(project: Project) -> float:
+    main = next((t for t in project.tracks if t.type == "video"), None)
+    ends = [c.start + clip_duration(c) for c in (main.clips if main else [])]
+    return max(ends) if ends else 0.0
+
+
+@router.post("/projects/{pid}/export/estimate")
+def export_estimate(pid: str, body: ExportBody):
+    project = Project.model_validate(body.project) if body.project else load_project(pid)
+
+    def job(ctx: JobContext) -> dict:
+        try:
+            return estimate_size(project, ctx)
+        except RenderError as e:
+            raise RuntimeError(str(e)) from e
+
+    return {"jobId": jobs.submit("estimate", "Estimating file size", job, queue="render", ref={"projectId": project.id}).id}
+
+
+class CoverBody(BaseModel):
+    project: dict | None = None
+    time: float = 0
+    text: dict | None = None  # a clip-like dict: {"text": spec, "transform": {...}} (drawn at rest)
+    hideText: bool = False  # leave the timeline's own text out of the frame
+
+
+def export_cover(project: Project, t: float, text: dict | None, hide_text: bool, ctx: JobContext | None = None) -> dict:
+    from PIL import Image
+    p = project.model_copy(deep=True)
+    if hide_text:
+        for tr in p.tracks:
+            if tr.type == "text":
+                tr.hidden = True
+    W, H = p.settings.width - p.settings.width % 2, p.settings.height - p.settings.height % 2
+    p.export.width, p.export.height = W, H
+    total = project_duration(p)
+    t = max(0.0, min(t, total - 0.1))
+    fps = float(p.export.fps if p.export.fps != "source" else p.settings.fps)
+    tmpdir = CACHE_DIR / "_render" / f"cov_{uuid.uuid4().hex[:8]}"
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    try:
+        clip_path = tmpdir / "c.mp4"
+        _render_range(p, t, t + 3 / fps, clip_path, ctx)
+        png = tmpdir / "f.png"
+        subprocess.run([config.FFMPEG, "-v", "error", "-y", "-i", str(clip_path), "-frames:v", "1", str(png)], check=True, capture_output=True)
+        img = Image.open(png).convert("RGBA")
+        if text and (text.get("text") or {}).get("content"):
+            clip = {"start": 0, "inPoint": 0, "outPoint": 10, "speed": 1, "keyframes": {},
+                    "transform": {"x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1, **(text.get("transform") or {})},
+                    "text": {**text["text"], "animIn": {"type": "none"}, "animOut": {"type": "none"}}}
+            lay = TX.build(clip["text"])
+            ops = TX.text_ops(lay, clip, 5.0, W, H)
+            box = TX._bbox(ops, W, H)
+            if box:
+                region = TX.Composer(lay).compose(ops, box)
+                img.alpha_composite(Image.fromarray(region, "RGBA"), (box[0], box[1]))
+        base = re.sub(r'[<>:"/\|?*\x00-\x1f]', "_", (p.export.fileName.strip() or p.name)).strip(" .") or "cover"
+        n, out = 1, EXPORTS_DIR / f"{base} cover.jpg"
+        while out.exists():
+            n += 1
+            out = EXPORTS_DIR / f"{base} cover {n}.jpg"
+        img.convert("RGB").save(out, quality=93)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return {"path": str(out), "file": out.name, "url": f"/files/exports/{out.name}", "size": out.stat().st_size}
+
+
+@router.post("/projects/{pid}/cover")
+def cover(pid: str, body: CoverBody):
+    project = Project.model_validate(body.project) if body.project else load_project(pid)
+
+    def job(ctx: JobContext) -> dict:
+        return export_cover(project, body.time, body.text, body.hideText, ctx)
+
+    return {"jobId": jobs.submit("cover", "Cover image", job, queue="render", ref={"projectId": project.id}).id}

@@ -8,6 +8,8 @@ import { clipDuration, clipEnd, contentEnd, TRACK_COLORS } from "../util";
 import { Icon } from "./Icons";
 import { MEDIA_DND } from "./MediaLibrary";
 import { loadWave } from "../player/waves";
+import { TEXT_PRESETS } from "../text/anim";
+import CaptionsDialog from "./CaptionsDialog";
 import * as E from "../motion/edit";
 import { api } from "../api";
 
@@ -196,6 +198,7 @@ export default function Timeline() {
 
   const st = useEditor.getState;
   const hasClipSel = selection.kind === "clip";
+  const [captionsOpen, setCaptionsOpen] = useState(false);
 
   return (
     <div className="timeline">
@@ -238,6 +241,11 @@ export default function Timeline() {
         <button className="btn ghost sm" onClick={() => st().addAdjustmentLayer()} title="Add an adjustment layer at the playhead: its filters grade everything below it">
           <Icon name="sparkles" size={14} /> Adjustment
         </button>
+        <TextMenu />
+        <button className="btn ghost sm" onClick={() => setCaptionsOpen(true)} title="Auto-captions: transcribe speech with faster-whisper (local, GPU)">
+          CC Captions
+        </button>
+        {captionsOpen && <CaptionsDialog onClose={() => setCaptionsOpen(false)} />}
         <span className="tl-sep" />
         <AddTrackMenu />
         <SfxMenu />
@@ -380,6 +388,16 @@ function TransitionBlocks({ track, pps }: { track: Track; pps: number }) {
         );
       })}
     </>
+  );
+}
+
+function TextMenu() {
+  return (
+    <select className="input" style={{ height: 24, fontSize: 12, width: 78 }} value="" title="Add text at the playhead"
+      onChange={(e) => e.target.value && useEditor.getState().addText(e.target.value)}>
+      <option value="">+ Text</option>
+      {TEXT_PRESETS.filter((p) => p.id !== "caption").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+    </select>
   );
 }
 
@@ -639,7 +657,7 @@ const ClipBlock = memo(function ClipBlock({
       {showWave && m && <Waveform m={m} c={c} width={w} muted={c.muted || track.muted} />}
       {m?.beats && (track.type === "audio" || track.type === "music") && pps * (60 / (m.bpm || 120)) >= 4 &&
         ops.clipBeats(c, m.beats).map((b) => <div key={b} className="beat" style={{ left: (b - c.start) * pps }} />)}
-      <div className="clabel">{c.adjustment ? "Adjustment layer" : m?.name ?? "Missing media"}</div>
+      <div className="clabel">{c.adjustment ? "Adjustment layer" : c.text ? `T  ${String((c.text as { content?: string }).content ?? "")}` : m?.name ?? "Missing media"}</div>
       {!track.locked && w > 3 * EDGE_PX && (
         <>
           <div className="edge left" />

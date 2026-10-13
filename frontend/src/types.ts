@@ -38,6 +38,8 @@ export interface Clip {
   text: Record<string, unknown> | null;
   /** Adjustment layer (overlay track, no media): grades everything below it for its duration. */
   adjustment?: boolean;
+  /** Photos: fill around the picture with a blurred, colour-matched extension. */
+  extend?: boolean;
   /** Speed ramp: speed (0.1-4x) along the clip, u = 0..1 of its timeline length. */
   speedRamp?: { points: { u: number; speed: number }[]; preset?: string } | null;
   [extra: string]: unknown;
@@ -69,6 +71,10 @@ export interface ExportSettings {
   fps: number | "source";
   range: { start: number; end: number } | null;
   fileName: string;
+  /** null = the preset's quality (shared/export_presets.json). */
+  video?: { kind: "crf" | "bitrate"; crf?: number; kbps?: number; maxKbps?: number; bufKbps?: number; profile?: string; level?: string; preset?: string; gop?: number } | null;
+  audioKbps?: number | null;
+  reduceGrain?: boolean | null;
 }
 
 export interface Project {
@@ -97,6 +103,8 @@ export interface MediaMeta {
   beats?: number[]; // beat times in source seconds
   sfx?: string; // bundled sound effect id (sfx/), if this is one
   sfxPeak?: number; // seconds into the effect that should land on the cut
+  /** Detected faces (normalised source boxes [x, y, w, h, score]); photos have one frame. */
+  faces?: { version: number; frames: { t: number; boxes: [number, number, number, number, number][] }[] };
 }
 
 export interface Job {

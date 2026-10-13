@@ -1,0 +1,85 @@
+{
+  "fonts": [
+    { "id": "Anton-Regular", "name": "Anton", "file": "Anton-Regular.ttf", "license": "OFL-1.1" },
+    { "id": "BebasNeue-Regular", "name": "Bebas Neue", "file": "BebasNeue-Regular.ttf", "license": "OFL-1.1" },
+    { "id": "ArchivoBlack-Regular", "name": "Archivo Black", "file": "ArchivoBlack-Regular.ttf", "license": "OFL-1.1" },
+    { "id": "Poppins-Regular", "name": "Poppins", "file": "Poppins-Regular.ttf", "license": "OFL-1.1" },
+    { "id": "Poppins-SemiBold", "name": "Poppins SemiBold", "file": "Poppins-SemiBold.ttf", "license": "OFL-1.1" },
+    { "id": "Poppins-Bold", "name": "Poppins Bold", "file": "Poppins-Bold.ttf", "license": "OFL-1.1" },
+    { "id": "DMSerifDisplay-Regular", "name": "DM Serif Display", "file": "DMSerifDisplay-Regular.ttf", "license": "OFL-1.1" },
+    { "id": "DMSerifDisplay-Italic", "name": "DM Serif Display Italic", "file": "DMSerifDisplay-Italic.ttf", "license": "OFL-1.1" },
+    { "id": "Pacifico-Regular", "name": "Pacifico", "file": "Pacifico-Regular.ttf", "license": "OFL-1.1" },
+    { "id": "SpecialElite-Regular", "name": "Special Elite", "file": "SpecialElite-Regular.ttf", "license": "Apache-2.0" }
+  ],
+  "defaults": {
+    "content": "Your text",
+    "font": "Poppins-Bold",
+    "size": 96,
+    "color": "#ffffff",
+    "outline": { "width": 0, "color": "#000000" },
+    "shadow": { "enabled": false, "color": "#000000", "opacity": 0.6, "blur": 8, "x": 0, "y": 4 },
+    "box": { "enabled": false, "color": "#000000", "opacity": 0.6, "padX": 24, "padY": 12, "radius": 16, "mode": "lines" },
+    "letterSpacing": 0,
+    "lineHeight": 1.15,
+    "align": "center",
+    "maxWidth": 900,
+    "uppercase": false,
+    "animIn": { "type": "none", "duration": 0.4, "easing": "out", "direction": "up", "distance": 80 },
+    "animOut": { "type": "none", "duration": 0.3, "easing": "in", "direction": "up", "distance": 80 },
+    "highlight": { "style": "none", "color": "#ffd34d" },
+    "words": null
+  },
+  "presets": [
+    {
+      "id": "hook", "label": "Bold hook title", "position": { "x": 0, "y": -420 },
+      "style": {
+        "font": "Anton-Regular", "size": 150, "uppercase": true, "color": "#fff4e2", "letterSpacing": 2, "lineHeight": 1.0,
+        "maxWidth": 860,
+        "shadow": { "enabled": true, "color": "#1a0d05", "opacity": 0.6, "blur": 14, "x": 0, "y": 6 },
+        "animIn": { "type": "pop", "duration": 0.35, "easing": "punch" },
+        "animOut": { "type": "fade", "duration": 0.25, "easing": "in" }
+      }
+    },
+    {
+      "id": "lowerthird", "label": "Minimal lower-third", "position": { "x": -150, "y": 420 },
+      "style": {
+        "font": "Poppins-SemiBold", "size": 44, "color": "#ffffff", "align": "left", "maxWidth": 640,
+        "box": { "enabled": true, "color": "#000000", "opacity": 0.55, "padX": 22, "padY": 12, "radius": 10, "mode": "lines" },
+        "animIn": { "type": "slide", "duration": 0.4, "easing": "out", "direction": "right", "distance": 60 },
+        "animOut": { "type": "fade", "duration": 0.3, "easing": "in" }
+      }
+    },
+    {
+      "id": "retro", "label": "Retro film title", "position": { "x": 0, "y": -300 },
+      "style": {
+        "font": "DMSerifDisplay-Italic", "size": 110, "color": "#f3e2c0", "letterSpacing": 4, "lineHeight": 1.05,
+        "shadow": { "enabled": true, "color": "#ff9a3c", "opacity": 0.45, "blur": 18, "x": 0, "y": 0 },
+        "animIn": { "type": "fade", "duration": 0.8, "easing": "inout" },
+        "animOut": { "type": "fade", "duration": 0.6, "easing": "inout" }
+      }
+    },
+    {
+      "id": "memetop", "label": "Meme top text", "position": { "x": 0, "y": -620 },
+      "style": {
+        "font": "Anton-Regular", "size": 110, "uppercase": true, "color": "#ffffff", "lineHeight": 1.05,
+        "outline": { "width": 7, "color": "#000000" }
+      }
+    },
+    {
+      "id": "memebottom", "label": "Meme bottom text", "position": { "x": 0, "y": 420 },
+      "style": {
+        "font": "Anton-Regular", "size": 110, "uppercase": true, "color": "#ffffff", "lineHeight": 1.05,
+        "outline": { "width": 7, "color": "#000000" }
+      }
+    },
+    {
+      "id": "caption", "label": "Captions (karaoke pop)", "position": { "x": 0, "y": 380 },
+      "style": {
+        "font": "Poppins-Bold", "size": 64, "color": "#ffffff", "maxWidth": 780, "lineHeight": 1.1,
+        "outline": { "width": 6, "color": "#000000" },
+        "shadow": { "enabled": true, "color": "#000000", "opacity": 0.5, "blur": 6, "x": 0, "y": 4 },
+        "highlight": { "style": "pop", "color": "#ffd34d" }
+      }
+    }
+  ]
+}

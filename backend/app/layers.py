@@ -210,15 +210,25 @@ def rounded_rect(src_w: float, src_h: float, crop: dict, fill: bool, W: int, H: 
 
 
 def motion_layer(g, src: str, c: dict, src_w: int, src_h: int, fill: bool, W: int, H: int, tau0: float, fps: float,
-                 nf: int, workdir: Path, *, rect: tuple[int, int, int, int] | None = None) -> str:
-    """Canvas-sized RGBA layer of `src` placed by the clip's (keyframed) transform."""
+                 nf: int, workdir: Path, *, rect: tuple[int, int, int, int] | None = None,
+                 extent: tuple[float, float, float, float] | None = None,
+                 img_map: tuple[float, float, float, float] | None = None) -> str:
+    """Canvas-sized RGBA layer of `src` placed by the clip's (keyframed) transform.
+
+    `rect` (source coords) defines the geometry; `extent` (source coords, default = rect) is the part
+    actually drawn, e.g. the whole photo or its extension; `img_map` = (ox, oy, sx, sy) says how the
+    input image relates to source coords: image px = (source - o) * s (default: the same)."""
     tr = c.get("transform") or {}
     crop = tr.get("crop") or {}
     x0, y0, cw, ch = rect or rounded_rect(src_w, src_h, crop, fill, W, H)
     f = min(W / cw, H / ch)
-    dens = min(1.0, f * max_scale(c))
-    ww, wh = max(2, rnd(cw * dens)), max(2, rnd(ch * dens))
-    kx, ky = ww / cw, wh / ch
+    ex0, ey0, ew, eh = extent or (x0, y0, cw, ch)
+    ox, oy, isx, isy = img_map or (0.0, 0.0, 1.0, 1.0)
+    ix0, iy0 = rnd((ex0 - ox) * isx), rnd((ey0 - oy) * isy)
+    icw, ich = max(2, rnd(ew * isx)), max(2, rnd(eh * isy))
+    dens = min(1.0, f * max_scale(c) / min(isx, isy))
+    ww, wh = max(2, rnd(icw * dens)), max(2, rnd(ich * dens))
+    kx, ky = ww / icw, wh / ich
     Wp, Hp = max(ww + 2 * PAD, W), max(wh + 2 * PAD, H)
     kf = c.get("keyframes") or {}
     T = f"({_f(tau0)}+(in-1)/{_f(fps)})"
@@ -235,12 +245,13 @@ def motion_layer(g, src: str, c: dict, src_w: int, src_h: int, fill: bool, W: in
         dx, dy = f"({_f(Qx)}-{_f(W / 2)}-ld(0))", f"({_f(Qy)}-{_f(H / 2)}-ld(1))"
         px = f"((cos(ld(3))*{dx}+sin(ld(3))*{dy})/(ld(2)*{_f(f * fx)})+{_f(cx)})"
         py = f"((-sin(ld(3))*{dx}+cos(ld(3))*{dy})/(ld(2)*{_f(f * fy)})+{_f(cy)})"
-        return f"'{pre}({px}-{_f(x0)})*{_f(kx)}+{PAD}'", f"'{pre}({py}-{_f(y0)})*{_f(ky)}+{PAD}'"
+        return (f"'{pre}(({px}-{_f(ox)})*{_f(isx)}-{ix0})*{_f(kx)}+{PAD}'",
+                f"'{pre}(({py}-{_f(oy)})*{_f(isy)}-{iy0})*{_f(ky)}+{PAD}'")
 
     cs = [corner(0, 0), corner(W, 0), corner(0, H), corner(W, H)]
     out = g.label("ml")
-    chain = [f"[{src}]format=rgba,crop={cw}:{ch}:{x0}:{y0}:exact=1"]
-    if (ww, wh) != (cw, ch):
+    chain = [f"[{src}]format=rgba,crop={icw}:{ich}:{ix0}:{iy0}:exact=1"]
+    if (ww, wh) != (icw, ich):
         chain.append(f"scale={ww}:{wh}:flags=bicubic")
     chain.append(f"pad={Wp}:{Hp}:{PAD}:{PAD}:color=0x00000000")
     chain.append("perspective=" + ":".join(f"x{i}={cs[i][0]}:y{i}={cs[i][1]}" for i in range(4))

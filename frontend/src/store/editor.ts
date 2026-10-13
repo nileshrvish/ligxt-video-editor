@@ -7,6 +7,8 @@ import { clipEnd, newClip, projectDuration as projectDurationOf, trackEnd, uid }
 import { toastError, useApp } from "./app";
 import * as E from "../motion/edit";
 import { srcTime } from "../motion/motion";
+import * as TE from "../text/edit";
+import type { TextSpec } from "../text/anim";
 
 export type Selection =
   | { kind: "none" }
@@ -82,6 +84,13 @@ interface EditorState {
   /** Whooshes on every main-track transition (hits on fades to/from white/black are left out). */
   whooshTransitions: () => Promise<number>;
   detachAudio: (clipId: string) => void;
+  /** Add a text clip (preset style) at the playhead on a text track and select it. */
+  addText: (presetId?: string, content?: string) => string | null;
+  /** Text clip whose on-canvas editor is open. */
+  editingText: string | null;
+  setEditingText: (id: string | null) => void;
+  /** Insert transcribed words as caption clips on a new "Captions" track. */
+  insertCaptions: (words: TE.TimedWord[], style: Partial<TextSpec>, position: { x: number; y: number }) => number;
   /** Split the selected main-track clip at the playhead and hold that frame for `seconds`. */
   freezeFrameAtPlayhead: (seconds?: number) => void;
   copyFilters: (clipId: string) => void;
@@ -122,6 +131,32 @@ export const useEditor = create<EditorState>((set, get) => ({
   filterClipboard: null,
   colorPick: null,
   setColorPick: (colorPick) => set({ colorPick }),
+  editingText: null,
+  setEditingText: (editingText) => set({ editingText }),
+
+  addText: (presetId = "hook", content) => {
+    const { project, playhead } = get();
+    if (!project) return null;
+    const preset = TE.presetById(presetId) ?? TE.presetById("hook")!;
+    let id: string | null = null;
+    get().commit((d) => {
+      let t = d.tracks.find((x) => x.type === "text" && !x.locked && x.name !== "Captions");
+      if (!t) t = d.tracks.find((x) => x.id === ops.addTrack(d, "text"))!;
+      const c = TE.newTextClip(0, 3, { ...structuredClone(preset.style), content: content ?? (preset.id === "lowerthird" ? "Name · Place" : "Your text") }, preset.position);
+      c.start = ops.nearestFreeStart(t, 3, Math.max(0, playhead));
+      t.clips.push(c);
+      ops.sortClips(t);
+      id = c.id;
+    });
+    if (id) set({ selection: { kind: "clip", clipId: id } });
+    return id;
+  },
+
+  insertCaptions: (words, style, position) => {
+    let n = 0;
+    get().commit((d) => void (n = TE.addCaptions(d, words, style, position).ids.length));
+    return n;
+  },
 
   addSfx: async (sfxId, times, volume = 0.35) => {
     if (!get().project || !times.length) return 0;

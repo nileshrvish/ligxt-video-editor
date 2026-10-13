@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, luts, media, presets_api, projects, render
+from . import captions, config, luts, media, presets_api, projects, render, text_api
 from .ffmpeg_utils import ffmpeg_version, has_nvenc
 from .jobs import jobs
 
@@ -40,6 +40,8 @@ app.include_router(projects.router)
 app.include_router(render.router)
 app.include_router(luts.router)
 app.include_router(presets_api.router)
+app.include_router(text_api.router)
+app.include_router(captions.router)
 
 
 @app.exception_handler(Exception)
@@ -132,6 +134,7 @@ app.mount("/files/cache", StaticFiles(directory=config.CACHE_DIR), name="cache-f
 app.mount("/files/exports", StaticFiles(directory=config.EXPORTS_DIR), name="export-files")
 app.mount("/files/projects", StaticFiles(directory=config.PROJECTS_DIR), name="project-files")
 app.mount("/files/templates", StaticFiles(directory=config.TEMPLATES_DIR), name="template-files")
+app.mount("/files/fonts", StaticFiles(directory=config.ROOT / "fonts"), name="font-files")
 
 if (config.FRONTEND_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=config.FRONTEND_DIST / "assets"), name="assets")

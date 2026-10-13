@@ -7,6 +7,37 @@ import { useEditor, useSelectedClip } from "../store/editor";
 import * as ops from "../timeline/ops";
 import type { Clip } from "../types";
 import { clipEnd } from "../util";
+import { textBox } from "../text/anim";
+import { textAsset } from "../text/cache";
+
+/** Click targets for the text on screen that isn't selected: a click selects it. */
+function TextHits({ fw, skip }: { fw: number; skip?: string }) {
+  const project = useEditor((s) => s.project!);
+  const t = useEditor((s) => s.playhead);
+  const playing = useEditor((s) => s.playing);
+  if (playing) return null;
+  const k = fw / project.settings.width;
+  const out: { id: string; pts: string }[] = [];
+  for (const tr of project.tracks) {
+    if (tr.type !== "text" || tr.hidden) continue;
+    for (const c of tr.clips) {
+      if (c.id === skip || !c.text || t < c.start || t >= clipEnd(c)) continue;
+      const a = textAsset(c.text);
+      if (a.status !== "ready" || !a.layout) continue;
+      out.push({ id: c.id, pts: textBox(a.layout, c, t - c.start, project.settings.width, project.settings.height).map(([x, y]) => `${x * k},${y * k}`).join(" ") });
+    }
+  }
+  return (
+    <>
+      {out.map((o) => (
+        <polygon key={o.id} points={o.pts} className="pv-hit" onPointerDown={(e) => { e.stopPropagation(); useEditor.getState().select({ kind: "clip", clipId: o.id }); }}
+          onDoubleClick={() => useEditor.getState().setEditingText(o.id)}>
+          <title>Click to select, double-click to type</title>
+        </polygon>
+      ))}
+    </>
+  );
+}
 
 export default function TransformHandles({ fw, fh }: { fw: number; fh: number }) {
   const sel = useSelectedClip();
@@ -14,10 +45,14 @@ export default function TransformHandles({ fw, fh }: { fw: number; fh: number })
   const playing = useEditor((s) => s.playing);
   const settings = useEditor((s) => s.project!.settings);
   const m = useEditor((s) => (sel?.clip.mediaId ? s.media[sel.clip.mediaId] : undefined));
-  if (!sel || playing || !m || m.type === "audio" || sel.clip.adjustment) return null;
-  if (sel.trackType !== "video" && sel.trackType !== "overlay") return null;
+  const isText = !!sel && sel.trackType === "text" && !!sel.clip.text;
+  const asset = isText ? textAsset(sel!.clip.text) : null;
+  const hits = <svg className="pv-handles" width={fw} height={fh} style={{ overflow: "visible" }}><TextHits fw={fw} skip={sel?.clip.id} /></svg>;
+  if (!sel || playing) return hits;
+  if (!isText && (!m || m.type === "audio" || sel.clip.adjustment || (sel.trackType !== "video" && sel.trackType !== "overlay"))) return hits;
+  if (isText && (asset?.status !== "ready" || !asset.layout)) return hits;
   const clip = sel.clip;
-  if (playhead < clip.start || playhead >= clipEnd(clip)) return null;
+  if (playhead < clip.start || playhead >= clipEnd(clip)) return hits;
 
   const { width: W, height: H } = settings;
   const k = fw / W;
@@ -25,10 +60,15 @@ export default function TransformHandles({ fw, fh }: { fw: number; fh: number })
   const isMain = sel.trackType === "video";
   const fill = (clip.fit ?? (isMain ? settings.background.mode : "fit")) === "fill";
   const tv = transformAt(clip, tau);
-  const rect = roundedRect(m.width || W, m.height || H, clip.transform.crop, fill, W, H);
-  const mat = rectMatrix(rect, W, H, tv);
-  const [x0, y0, cw, ch] = rect;
-  const corners = [[x0, y0], [x0 + cw, y0], [x0 + cw, y0 + ch], [x0, y0 + ch]].map(([x, y]) => apply(mat, x, y).map((v) => v * k));
+  let corners: number[][];
+  if (isText) {
+    corners = textBox(asset!.layout!, clip, tau, W, H).map(([x, y]) => [x * k, y * k]);
+  } else {
+    const rect = roundedRect(m!.width || W, m!.height || H, clip.transform.crop, fill, W, H);
+    const mat = rectMatrix(rect, W, H, tv);
+    const [x0, y0, cw, ch] = rect;
+    corners = [[x0, y0], [x0 + cw, y0], [x0 + cw, y0 + ch], [x0, y0 + ch]].map(([x, y]) => apply(mat, x, y).map((v) => v * k));
+  }
   const C = [(W / 2 + tv.x) * k, (H / 2 + tv.y) * k];
   const topMid = [(corners[0][0] + corners[1][0]) / 2, (corners[0][1] + corners[1][1]) / 2];
   const away = Math.hypot(topMid[0] - C[0], topMid[1] - C[1]) || 1;
@@ -41,17 +81,24 @@ export default function TransformHandles({ fw, fh }: { fw: number; fh: number })
     }, false);
 
   /** Generic drag: `onMove` gets the pointer in project pixels. */
-  const drag = (onMove: (px: number, py: number, ev: PointerEvent) => void) => (e: React.PointerEvent) => {
+  const drag = (onMove: (px: number, py: number, ev: PointerEvent) => void, onClick?: () => void) => (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const frame = (e.currentTarget as Element).closest("svg")!.getBoundingClientRect();
     const st = useEditor.getState();
     st.beginGesture();
-    const move = (ev: PointerEvent) => onMove((ev.clientX - frame.left) / k, (ev.clientY - frame.top) / k, ev);
+    const x0 = e.clientX, y0 = e.clientY;
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 3) return;
+      moved = true;
+      onMove((ev.clientX - frame.left) / k, (ev.clientY - frame.top) / k, ev);
+    };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       useEditor.getState().endGesture();
+      if (!moved) onClick?.();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -70,7 +117,7 @@ export default function TransformHandles({ fw, fh }: { fw: number; fh: number })
         if (Math.abs(ny) < 12) ny = 0;
       }
       update((c) => { E.setProp(c, "x", tau, Math.round(nx)); E.setProp(c, "y", tau, Math.round(ny)); });
-    })(e);
+    }, isText ? () => useEditor.getState().setEditingText(clip.id) : undefined)(e);
   };
   const onScaleStart = (e: React.PointerEvent) => {
     const frame = (e.currentTarget as Element).closest("svg")!.getBoundingClientRect();
@@ -93,8 +140,9 @@ export default function TransformHandles({ fw, fh }: { fw: number; fh: number })
 
   return (
     <svg className="pv-handles" width={fw} height={fh} style={{ overflow: "visible" }}>
+      <TextHits fw={fw} skip={clip.id} />
       <polygon points={corners.map((p) => p.join(",")).join(" ")} className="pv-poly" onPointerDown={onMoveStart}>
-        <title>Drag to move (Alt: no centre snapping)</title>
+        <title>{isText ? "Click to type, drag to move (Alt: no centre snapping)" : "Drag to move (Alt: no centre snapping)"}</title>
       </polygon>
       <line x1={topMid[0]} y1={topMid[1]} x2={knob[0]} y2={knob[1]} className="pv-stem" />
       {corners.map((p, i) => (

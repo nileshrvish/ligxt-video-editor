@@ -1,0 +1,56 @@
+{
+  "presets": [
+    {
+      "id": "instagram", "label": "Instagram (optimized)", "sub": "Reels upload, survives the re-encode",
+      "w": 1080, "h": 1920,
+      "video": { "kind": "bitrate", "kbps": 12000, "maxKbps": 16000, "bufKbps": 24000, "profile": "high", "level": "4.2", "preset": "slow", "gop": 60 },
+      "audioKbps": 256, "reduceGrain": true,
+      "note": "H.264 High 4.2, 12 Mbps (max 16), 2 s keyframes, AAC 256k. A clean, not-too-heavy file gives Instagram's re-encode less to destroy; reduced grain avoids the blocky 'boiling' noise after upload."
+    },
+    {
+      "id": "reels", "label": "Reels (max quality)", "sub": "Best quality master",
+      "w": 1080, "h": 1920,
+      "video": { "kind": "crf", "crf": 18, "profile": "high", "preset": "slow" },
+      "audioKbps": 192, "reduceGrain": false,
+      "note": "H.264 High, CRF 18, preset slow, AAC 192k. Keep this as the master; file size depends on grain and motion."
+    },
+    {
+      "id": "shorts", "label": "YouTube Shorts", "sub": "9:16 master for YouTube",
+      "w": 1080, "h": 1920,
+      "video": { "kind": "crf", "crf": 18, "profile": "high", "preset": "slow", "gop": 15 },
+      "audioKbps": 256, "reduceGrain": false,
+      "note": "H.264 High, CRF 18, closed GOP of half a second as YouTube recommends, AAC 256k."
+    },
+    {
+      "id": "tiktok", "label": "TikTok", "sub": "9:16, ~10 Mbps",
+      "w": 1080, "h": 1920,
+      "video": { "kind": "bitrate", "kbps": 10000, "maxKbps": 14000, "bufKbps": 20000, "profile": "high", "level": "4.2", "preset": "slow", "gop": 60 },
+      "audioKbps": 192, "reduceGrain": true,
+      "note": "H.264 High, 10 Mbps (max 14), AAC 192k, reduced grain."
+    },
+    {
+      "id": "square", "label": "Square", "sub": "1:1 feed post",
+      "w": 1080, "h": 1080,
+      "video": { "kind": "crf", "crf": 18, "profile": "high", "preset": "slow" },
+      "audioKbps": 192, "reduceGrain": false, "note": "H.264 High, CRF 18."
+    },
+    {
+      "id": "portrait", "label": "Portrait 4:5", "sub": "Feed post",
+      "w": 1080, "h": 1350,
+      "video": { "kind": "crf", "crf": 18, "profile": "high", "preset": "slow" },
+      "audioKbps": 192, "reduceGrain": false, "note": "H.264 High, CRF 18."
+    },
+    {
+      "id": "youtube", "label": "YouTube 16:9", "sub": "1920x1080 HD",
+      "w": 1920, "h": 1080,
+      "video": { "kind": "crf", "crf": 18, "profile": "high", "preset": "slow", "gop": 15 },
+      "audioKbps": 256, "reduceGrain": false, "note": "H.264 High, CRF 18, AAC 256k."
+    },
+    {
+      "id": "custom", "label": "Custom", "sub": "Any size and quality",
+      "w": 0, "h": 0,
+      "video": { "kind": "crf", "crf": 18, "profile": "high", "preset": "slow" },
+      "audioKbps": 192, "reduceGrain": false, "note": "Your own size, frame rate and quality."
+    }
+  ]
+}

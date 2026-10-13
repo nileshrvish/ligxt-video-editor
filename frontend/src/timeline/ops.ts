@@ -7,6 +7,7 @@
 // - Every other track allows gaps but never overlaps: a clip lands in the nearest free slot.
 import type { Clip, Marker, Project, Track, TrackType } from "../types";
 import { clipDuration, clipEnd, uid } from "../util";
+import { splitText } from "../text/edit";
 
 export const MIN_CLIP = 0.1; // seconds
 const EPS = 1e-6;
@@ -200,6 +201,7 @@ export function splitClip(p: Project, clipId: string, time: number): string | nu
     c.keyframes[k] = list.filter((kf) => kf.time <= offset + EPS);
     right.keyframes[k] = list.filter((kf) => kf.time >= offset - EPS).map((kf) => ({ ...kf, time: round(kf.time - offset) }));
   }
+  if (c.text) splitText(c, right, offset);
   hit.track.clips.splice(hit.index + 1, 0, right);
   // A transition that left the original clip now leaves the right half.
   for (const tr of p.transitions) if (tr.fromClipId === c.id) tr.fromClipId = right.id;

@@ -53,6 +53,15 @@ export const api = {
   getMediaOne: (id: string) => req<MediaMeta>("GET", `/api/media/${id}`),
   reprocessMedia: (id: string) => req<{ jobId: string }>("POST", `/api/media/${id}/reprocess`),
   detectBeats: (id: string) => req<{ jobId: string }>("POST", `/api/media/${id}/beats`),
+  textStyles: () => req<{ styles: { id: string; name: string; style: Record<string, unknown> }[] }>("GET", "/api/text-styles"),
+  saveTextStyle: (name: string, style: Record<string, unknown>) => req<{ id: string; name: string }>("POST", "/api/text-styles", { name, style }),
+  deleteTextStyle: (id: string) => req<{ ok: boolean }>("DELETE", `/api/text-styles/${id}`),
+  captions: (p: Project, model: string, language: string | null) =>
+    req<{ jobId: string }>("POST", `/api/projects/${p.id}/captions`, { project: p, model, language }),
+  estimateSize: (p: Project) => req<{ jobId: string }>("POST", `/api/projects/${p.id}/export/estimate`, { project: p, mode: "final" }),
+  exportCover: (p: Project, time: number, text: Record<string, unknown> | null, hideText: boolean) =>
+    req<{ jobId: string }>("POST", `/api/projects/${p.id}/cover`, { project: p, time, text, hideText }),
+  detectFaces: (id: string) => req<{ jobId: string }>("POST", `/api/media/${id}/faces`),
   sfxLibrary: () => req<{ sfx: { id: string; name: string; peak: number }[] }>("GET", "/api/media/sfx/library"),
   importSfx: (id: string) => req<{ media: MediaMeta; jobId: string }>("POST", `/api/media/sfx/${id}/import`),
 

@@ -14,6 +14,9 @@ import { FilterRenderer, type GradeContext } from "../grade/renderer";
 import { needsGrade } from "../grade/math";
 import { duckGain, duckRegions, hasMotion, rectMatrix, roundedRect, rnd, srcTime, transformAt, valueAt } from "../motion/motion";
 import { loadWave, type Wave } from "./waves";
+import { textOps } from "../text/anim";
+import { onTextAssets, textAsset, textAssetFor, type TextAsset } from "../text/cache";
+import { extension, onExtLoaded } from "./extend";
 
 const PREROLL = 1.5; // seconds: load + seek upcoming clips ahead of time
 const KEEP_IDLE_MS = 4000; // drop elements unused for this long
@@ -27,6 +30,8 @@ interface Active {
   /** null for adjustment layers (no media; they grade everything below them). */
   media: MediaMeta;
   adjust?: boolean;
+  /** Text clips (no media): drawn from the backend-rendered text images. */
+  text?: boolean;
   isMain: boolean;
   visual: boolean;
   audible: boolean;
@@ -98,12 +103,18 @@ export class PreviewEngine {
     });
     this.compare = useEditor.getState().compare;
     this.fx.onAsset = () => (this.dirty = true);
+    this.unsubAssets = [onTextAssets(() => (this.dirty = true)), onExtLoaded(() => (this.dirty = true))];
     this.raf = requestAnimationFrame(this.tick);
   }
+
+  private unsubAssets: (() => void)[] = [];
+  /** Text clip being edited on the canvas (hidden while its editor box is open). */
+  editingTextId: string | null = null;
 
   destroy() {
     cancelAnimationFrame(this.raf);
     this.unsub();
+    this.unsubAssets.forEach((f) => f());
     for (const slot of this.slots.values()) this.dispose(slot);
     this.slots.clear();
     this.audio?.close().catch(() => void 0);
@@ -227,7 +238,14 @@ export class PreviewEngine {
     const incoming = new Map<string, TransitionPlan>();
     for (const pl of plans.values()) incoming.set(pl.toId, pl);
     for (const track of p.tracks) {
-      if (track.type === "text") continue; // Phase 6
+      if (track.type === "text") {
+        if (track.hidden) continue;
+        for (const clip of track.clips) {
+          if (!clip.text || t < clip.start || t >= clipEnd(clip) || clip.id === this.editingTextId) continue;
+          out.push({ clip, track, media: null as unknown as MediaMeta, text: true, isMain: false, visual: true, audible: false, preroll: false });
+        }
+        continue;
+      }
       const isMain = track === main;
       for (const clip of track.clips) {
         if (clip.adjustment && !clip.mediaId) {
@@ -367,7 +385,7 @@ export class PreviewEngine {
 
   private sync(active: Active[], t: number, playing: boolean, rate: number, fps: number, now: number, speech: [number, number][]) {
     for (const a of active) {
-      if (a.adjust) continue;
+      if (a.adjust || a.text) continue;
       const slot = this.slotFor(a, now);
       if (!slot) continue;
       const el = slot.el;
@@ -424,8 +442,16 @@ export class PreviewEngine {
       return t >= a.clip.start;
     });
     // Readiness first, so we never flash a half-drawn frame.
+    const texts = new Map<Active, TextAsset>();
     const sources: (CanvasImageSource | null)[] = layers.map((a) => {
       if (a.adjust) return this.layerAdj;
+      if (a.text) {
+        const asset = textAssetFor(a.clip.id, a.clip.text);
+        if (!asset) return textAsset(a.clip.text).status === "error" ? this.layerAdj : null; // failed: draw nothing
+        texts.set(a, asset);
+        return asset.imgs!.base;
+      }
+      if (a.clip.extend && a.media.type === "image" && extension(a.media.id).status === "loading") return null;
       if (a.media.type === "image") {
         const img = this.image(a.media);
         return img.complete && img.naturalWidth ? img : null;
@@ -434,7 +460,7 @@ export class PreviewEngine {
       return el && el.readyState >= 2 ? el : null;
     });
     if (sources.some((s) => !s)) return false;
-    const frame = { layers, sources, trA, trB, inTransition };
+    const frame = { layers, sources, trA, trB, inTransition, texts };
     // Compose off-screen and only show complete frames: if a grading asset is still loading, the
     // previous frame stays on screen instead of a half-drawn (or black) one.
     const cw0 = this.canvas.width, ch0 = this.canvas.height;
@@ -469,7 +495,7 @@ export class PreviewEngine {
   /** Composite one frame into `ctx` (the main canvas, or the "before" canvas with `bypass`). */
   private compose(
     ctx: CanvasRenderingContext2D, target: HTMLCanvasElement, p: Project,
-    f: { layers: Active[]; sources: (CanvasImageSource | null)[]; trA?: Active; trB?: Active; inTransition: boolean },
+    f: { layers: Active[]; sources: (CanvasImageSource | null)[]; trA?: Active; trB?: Active; inTransition: boolean; texts: Map<Active, TextAsset> },
     t: number, bypass: boolean,
   ): boolean {
     const { width: W, height: H } = p.settings;
@@ -541,6 +567,11 @@ export class PreviewEngine {
         ctx.globalAlpha = Math.max(0, Math.min(1, (a.clip.transform?.opacity ?? 1) * strength));
         ctx.drawImage(graded, 0, 0, cw, ch);
         ctx.globalAlpha = 1;
+        continue;
+      }
+      if (a.text) {
+        const asset = f.texts.get(a);
+        if (asset) this.drawText(ctx, asset, a.clip, t, W, H, k);
         continue;
       }
       if (a.isMain) {
@@ -638,7 +669,8 @@ export class PreviewEngine {
       ctx.drawImage(this.backdrop(src, sw, sh, W, H), 0, 0, W * k, H * k);
       ctx.restore();
     }
-    if (a.isMain && !hasMotion(a.clip)) {
+    const ext = a.clip.extend && a.media.type === "image" ? extension(a.media.id) : null;
+    if (a.isMain && !hasMotion(a.clip) && !ext) {
       const g = layerGeometry(sw, sh, a.clip, true, p.settings.background.mode, W, H);
       ctx.save();
       ctx.translate(g.cx * k, g.cy * k);
@@ -658,7 +690,33 @@ export class PreviewEngine {
     ctx.save();
     ctx.setTransform(k * m[0], k * m[1], k * m[2], k * m[3], k * m[4], k * m[5]);
     ctx.globalAlpha = Math.max(0, Math.min(1, tv.opacity));
-    ctx.drawImage(src, x0, y0, rw, rh, x0, y0, rw, rh);
+    if (ext?.status === "ready") {
+      // Photo extension (export: render.ext_layers): the fill image, then the whole photo on top.
+      const { fx, fy } = ext.info!;
+      ctx.drawImage(ext.img!, 0, 0, ext.img!.naturalWidth, ext.img!.naturalHeight, -fx * sw, -fy * sh, sw * (1 + 2 * fx), sh * (1 + 2 * fy));
+      ctx.drawImage(src, 0, 0, sw, sh, 0, 0, sw, sh);
+    } else {
+      ctx.drawImage(src, x0, y0, rw, rh, x0, y0, rw, rh);
+    }
+    ctx.restore();
+  }
+
+  /** A text clip from its rendered images (export: text.Composer with the same operations). */
+  private drawText(ctx: CanvasRenderingContext2D, asset: TextAsset, clip: Clip, t: number, W: number, H: number, k: number) {
+    const lay = asset.layout!;
+    const R = lay.res, m = lay.m;
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    for (const op of textOps(lay, clip, t - clip.start, W, H)) {
+      const img = asset.imgs![op.img];
+      if (!img) continue;
+      const [x0, y0, x1, y1] = op.tile;
+      const M = op.m;
+      ctx.setTransform(k * M[0], k * M[1], k * M[2], k * M[3], k * M[4], k * M[5]);
+      ctx.globalAlpha = Math.max(0, Math.min(1, op.alpha));
+      ctx.drawImage(img, (x0 + m) * R, (y0 + m) * R, (x1 - x0) * R, (y1 - y0) * R, x0, y0, x1 - x0, y1 - y0);
+    }
     ctx.restore();
   }
 

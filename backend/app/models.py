@@ -56,21 +56,6 @@ class Filter(Base):
     enabled: bool = True
 
 
-class TextStyle(Base):
-    text: str = ""
-    font: str = "Inter"
-    size: float = 72
-    color: str = "#ffffff"
-    outlineColor: str = "#000000"
-    outlineWidth: float = 0
-    shadow: bool = False
-    box: bool = False
-    boxColor: str = "#00000099"
-    align: str = "center"
-    animIn: str = "none"
-    animOut: str = "none"
-
-
 class Clip(Base):
     id: str = Field(default_factory=new_id)
     mediaId: Optional[str] = None  # None for text clips
@@ -85,10 +70,13 @@ class Clip(Base):
     fadeIn: float = 0
     fadeOut: float = 0
     fit: Optional[Literal["fit", "fill", "blur"]] = None  # None = project default
+    extend: bool = False  # photos: fill around the picture with a blurred, colour-matched extension
     transform: Transform = Field(default_factory=Transform)
     keyframes: dict[str, list[Keyframe]] = Field(default_factory=dict)
     filters: list[Filter] = Field(default_factory=list)
-    text: Optional[TextStyle] = None
+    # Text clips: the text spec (content, font, style, animations, caption word timings); see
+    # shared/text_styles.json for the fields and defaults.
+    text: Optional[dict] = None
     adjustment: bool = False  # adjustment layer (overlay track, no media): grades everything below it
     speedRamp: Optional[dict] = None  # {"points": [{"u": 0..1, "speed": 0.1..4}, ...]}
 
@@ -153,6 +141,11 @@ class ExportSettings(Base):
     fps: Union[float, Literal["source"]] = 30.0
     range: Optional[ExportRange] = None
     fileName: str = ""
+    # Quality: None = the preset's (shared/export_presets.json). Custom: {"kind": "crf", "crf": 18} or
+    # {"kind": "bitrate", "kbps": 12000, "maxKbps": 16000, ...}.
+    video: Optional[dict] = None
+    audioKbps: Optional[int] = None
+    reduceGrain: Optional[bool] = None  # None = the preset's default
 
 
 class Project(Base):

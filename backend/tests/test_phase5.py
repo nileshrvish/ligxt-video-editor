@@ -45,6 +45,7 @@ def proj(client, main, extra=None, aspect="9:16"):
         next(t for t in p["tracks"] if t["type"] == ttype)["clips"] = cl
     p["media"] = list({c["mediaId"] for t in p["tracks"] for c in t["clips"] if c.get("mediaId")})
     p["export"].update({"width": W, "height": H, "fps": 30})
+    p["settings"].update({"width": W, "height": H})  # positions are canvas (project) pixels
     return p
 
 

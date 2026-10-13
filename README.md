@@ -39,6 +39,8 @@ Stop it with **Ctrl+C** in the PowerShell window.
 | `projects\`  | `projects\<id>\project.json` and `autosave\` (last 10 autosaves, every 30 s) |
 | `exports\`   | Rendered videos |
 | `templates\` | Style templates (Phase 7) |
+| `fonts\`     | Bundled fonts (OFL / Apache 2.0, see `fonts\README.md`) |
+| `models\`    | Face detector; the captions speech model is downloaded into `models\whisper` |
 | `sfx\`       | Bundled sound effects (whoosh, fast whoosh, hit, riser), synthesised, CC0 |
 
 ## Keyboard shortcuts
@@ -90,11 +92,32 @@ Timeline mouse: drag a clip to move it (or to another track of the same kind), d
 - **Audio**: volume keyframes, fade in/out on any clip, Detach audio, auto-duck (the `duck` button on a music track lowers it under speech), `+ SFX` adds a sound effect whose peak lands on the playhead or a whoosh on every transition.
 - **Selective colour** (Colour & effects): keep one colour (hue, range, softness, or pick it from the preview) and turn the rest black and white.
 
+## Text and captions
+
+- **Add text**: `+ Text` in the timeline toolbar (Bold hook title, Minimal lower-third, Retro film title, Meme top/bottom text). Select it to style it in Properties: font, size, colour, CAPS, alignment, letter spacing, line height, wrap width, outline, shadow/glow, background box (per line or block). **+ Save my text style** keeps a look for later.
+- **On the canvas**: click a text to select it; click it again (or double-click) to type on the canvas (Esc or a click outside finishes); drag to move, corners to scale, the knob to rotate.
+- **Animations**: In and Out separately: fade, slide (from below/above/left/right), pop/scale, typewriter, word by word, each with a duration and easing. Position, scale, rotation and opacity take ◆ keyframes like clips.
+- **Auto-captions** (`CC Captions`): speech on the video and audio tracks is transcribed locally with faster-whisper (GPU when available, free). The first run downloads the model (about 460 MB for "small") into `models\whisper`. Captions land on a "Captions" track as short segments with word timings, placed above the Reels caption area. Highlight styles: karaoke pop, karaoke colour, reveal as spoken. Editing a caption's text keeps the timings; splitting a caption splits its words. If there is no speech, you are told so and nothing is added.
+- **Safe areas**: the preview warns when text or a detected face sits under the Reels header, the caption area or the buttons (badge next to *Safe areas*; click a warning to jump there). Faces are found on import (OpenCV YuNet, `modelsace_detection_yunet_2023mar.onnx`, MIT).
+- **Extend canvas** (photos, Properties > Frame): fills around the photo with a blurred, colour-matched extension, so a photo can be moved or zoomed out without showing its edges.
+
 ## Export settings
 
-- **Final**: libx264, CRF 18, preset slow, yuv420p, AAC 192 kbps stereo at 48 kHz, `+faststart`
+| Preset | Size | Video | Audio | Grain |
+|--------|------|-------|-------|-------|
+| Instagram (optimized) | 1080×1920 | H.264 High 4.2, 12 Mbps (max 16), 2 s keyframes | AAC 256k | reduced |
+| Reels (max quality) | 1080×1920 | H.264 High, CRF 18 | AAC 192k | full |
+| YouTube Shorts | 1080×1920 | H.264 High, CRF 18, 0.5 s keyframes | AAC 256k | full |
+| TikTok | 1080×1920 | H.264 High 4.2, 10 Mbps (max 14) | AAC 192k | reduced |
+| Square / Portrait 4:5 | 1080×1080 / 1080×1350 | H.264 High, CRF 18 | AAC 192k | full |
+| YouTube 16:9 | 1920×1080 | H.264 High, CRF 18 | AAC 256k | full |
+| Custom | any | constant quality (CRF) or bitrate | | either |
+
+- Why the Instagram preset: Instagram re-encodes every upload to a much lower bitrate. A clean, moderately sized file with less film grain survives that better than a huge, noisy master ("reduce grain" exports grain at 35 %).
 - **Draft**: h264_nvenc (GPU), fast. Falls back to fast CPU encoding if NVENC is unavailable.
-- Presets: Instagram Reels / Shorts / TikTok (1080×1920), Square (1080×1080), Portrait 4:5 (1080×1350), YouTube (1920×1080), Custom.
+- The video is composed on the project canvas and scaled to the preset; a different aspect ratio is letterboxed (change the project's aspect ratio to reframe instead).
+- **File-size estimate** before export: exact from the bitrate for bitrate presets, otherwise from three 1-second test renders.
+- **Cover image**: in the export dialog, *Save cover* writes a JPG of the frame at the playhead, optionally with a title (one of your text clips or custom text), to `exports\`.
 - Every export runs an audio/video sync check and reports the result.
 
 ## Development
@@ -116,6 +139,10 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 ## Bundled LUTs and licenses
 
 `luts\` holds four example LUTs (Teal & Orange, Bleach Bypass, Matte Fade, Sunset Warm). They were generated for this project by `scripts\make_luts.py` from simple colour formulas, contain no third-party material, and are released under **CC0 1.0** (public domain, see `luts\LICENSE.md`). LUTs you import are stored in `user_luts` and keep their own licenses.
+
+`fonts\` holds the bundled fonts: Anton, Bebas Neue, Archivo Black, Poppins, DM Serif Display, Pacifico (SIL Open Font License 1.1) and Special Elite (Apache 2.0), from the Google Fonts repository. They may be used in any video, also commercially; licenses and sources are in `fonts\README.md` and next to each font.
+
+`modelsace_detection_yunet_2023mar.onnx` is OpenCV's YuNet face detector (MIT, `models\YUNET-LICENSE.txt`). The speech model for captions is downloaded on first use from Hugging Face (Systran/faster-whisper, MIT).
 
 `sfx\` holds sound effects synthesised from noise and sine waves by `scripts\make_sfx.py`; no recordings or samples are used, and they are released under **CC0 1.0** (see `sfx\LICENSE.md`).
 

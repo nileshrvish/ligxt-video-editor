@@ -1,18 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { toastError, useApp } from "../store/app";
 import { useEditor } from "../store/editor";
 import { fmtBytes, fmtEta, fmtTime, projectDuration } from "../util";
 import { AspectShape, Modal, ProgressBar } from "./Common";
+import presetsJson from "../../../shared/export_presets.json";
+import { TEXT_PRESETS } from "../text/anim";
 import { Icon } from "./Icons";
 
-export const EXPORT_PRESETS = [
-  { id: "reels", label: "Instagram Reels", sub: "Shorts / TikTok", w: 1080, h: 1920 },
-  { id: "square", label: "Square", sub: "Feed post", w: 1080, h: 1080 },
-  { id: "portrait", label: "Portrait 4:5", sub: "Feed post", w: 1080, h: 1350 },
-  { id: "youtube", label: "YouTube", sub: "16:9 HD", w: 1920, h: 1080 },
-  { id: "custom", label: "Custom", sub: "Any size", w: 0, h: 0 },
-];
+export interface ExportPreset {
+  id: string; label: string; sub: string; w: number; h: number; note: string; audioKbps: number; reduceGrain: boolean;
+  video: { kind: "crf" | "bitrate"; crf?: number; kbps?: number; maxKbps?: number; profile?: string; level?: string; preset?: string; gop?: number };
+}
+export const EXPORT_PRESETS = presetsJson.presets as ExportPreset[];
 
 export const OPEN_FOLDER_KEY = "ligxt.openFolderAfterExport";
 export const openFolderAfterExport = () => localStorage.getItem(OPEN_FOLDER_KEY) !== "0";
@@ -41,6 +41,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
   }, []);
 
   const set = (fn: (e: typeof ex) => void) => useEditor.getState().commit((p) => fn(p.export), false);
+  const est = useEstimate(project, duration, useRange ? range : null);
   const preset = EXPORT_PRESETS.find((p) => p.id === ex.preset) ?? EXPORT_PRESETS[EXPORT_PRESETS.length - 1];
   const projAspect = aspectOf(project.settings.width, project.settings.height);
   const outAspect = ex.width && ex.height ? aspectOf(ex.width, ex.height) : projAspect;
@@ -118,6 +119,9 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
                   onClick={() =>
                     set((e) => {
                       e.preset = p.id;
+                      e.video = null;
+                      e.audioKbps = null;
+                      e.reduceGrain = null;
                       if (p.w) {
                         e.width = p.w;
                         e.height = p.h;
@@ -143,7 +147,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
             )}
             {outAspect !== projAspect && (
               <div style={{ color: "var(--warn)", fontSize: 12 }}>
-                <Icon name="alert" size={12} /> The project canvas is {projAspect} but this export is {outAspect}. Clips will be re-fitted using each clip's fit mode.
+                <Icon name="alert" size={12} /> The project canvas is {projAspect} but this export is {outAspect}: the video is letterboxed (bars in the background colour). To reframe instead, change the project's aspect ratio (Properties, with nothing selected).
               </div>
             )}
           </div>
@@ -155,13 +159,19 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
                 <button className={ex.mode === "final" ? "on" : ""} onClick={() => set((e) => void (e.mode = "final"))}>Final</button>
                 <button className={ex.mode === "draft" ? "on" : ""} onClick={() => set((e) => void (e.mode = "draft"))}>Draft (fast)</button>
               </div>
-              <span className="faint" style={{ fontSize: 11, maxWidth: 260 }}>
+              <span className="faint" style={{ fontSize: 11, maxWidth: 300 }}>
                 {ex.mode === "final"
-                  ? "H.264 (x264) CRF 18, preset slow, AAC 192k. Best quality for upload."
+                  ? preset.note
                   : nvenc === false
                     ? "GPU encoder not available: uses fast CPU encoding."
                     : "GPU (NVENC) encoding: several times faster, for quick checks."}
               </span>
+              {ex.mode === "final" && preset.id === "custom" && <CustomQuality />}
+              <label className="row fl-check" title="Instagram and TikTok turn heavy film grain into blocky, boiling noise. This exports grain at 35 % (the look is kept, the noise is not).">
+                <input type="checkbox" checked={ex.reduceGrain ?? preset.reduceGrain}
+                  onChange={(e) => set((x) => void (x.reduceGrain = e.target.checked))} />
+                Reduce grain for upload
+              </label>
             </div>
             <div className="field">
               <label>Frame rate</label>
@@ -195,6 +205,16 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="field">
+            <label>Estimated file size</label>
+            <div className="row" style={{ fontSize: 13 }}>
+              {ex.mode === "draft" ? <span className="faint">Draft exports are quick previews; size not estimated.</span>
+                : est.bytes != null ? <><b>{fmtBytes(est.bytes)}</b><span className="faint">{est.method === "bitrate" ? "(from the bitrate)" : "(from three 1-second test renders)"}</span></>
+                  : est.busy ? <><Icon name="loader" size={13} className="spin" /><span className="faint">Estimating (renders three 1-second samples)…</span></>
+                    : <span className="faint">{est.error ?? "…"}</span>}
+            </div>
+          </div>
+
+          <div className="field">
             <label>File name</label>
             <div className="row">
               <input className="input" style={{ flex: 1 }} placeholder={project.name} value={ex.fileName} onChange={(e) => set((x) => void (x.fileName = e.target.value))} />
@@ -204,6 +224,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
               <input type="checkbox" checked={openAfter} onChange={(e) => setOpenAfter(e.target.checked)} /> Open the exports folder when done
             </label>
           </div>
+          <CoverPanel playhead={playhead} />
         </>
       )}
     </Modal>
@@ -266,6 +287,114 @@ function JobView({ job, elapsed }: { job: NonNullable<ReturnType<typeof useApp.g
           <pre className="log">{job.log}</pre>
         </details>
       )}
+    </div>
+  );
+}
+
+function CustomQuality() {
+  const ex = useEditor((s) => s.project!.export);
+  const set = (fn: (e: typeof ex) => void) => useEditor.getState().commit((p) => fn(p.export), false);
+  const v = ex.video ?? { kind: "crf" as const, crf: 18 };
+  return (
+    <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+      <div className="seg">
+        <button className={v.kind === "crf" ? "on" : ""} onClick={() => set((e) => void (e.video = { kind: "crf", crf: 18, profile: "high", preset: "slow" }))}>Constant quality</button>
+        <button className={v.kind === "bitrate" ? "on" : ""} onClick={() => set((e) => void (e.video = { kind: "bitrate", kbps: 12000, maxKbps: 16000, profile: "high", preset: "slow" }))}>Bitrate</button>
+      </div>
+      {v.kind === "crf" ? (
+        <label className="row" style={{ fontSize: 12, gap: 4 }}>CRF
+          <input className="input" type="number" min={12} max={30} style={{ width: 60 }} value={v.crf ?? 18}
+            onChange={(e) => set((x) => void (x.video = { ...v, crf: Math.max(12, Math.min(30, +e.target.value)) }))} />
+          <span className="faint">(lower = better, bigger)</span></label>
+      ) : (
+        <label className="row" style={{ fontSize: 12, gap: 4 }}>
+          <input className="input" type="number" min={1000} max={80000} step={500} style={{ width: 80 }} value={v.kbps ?? 12000}
+            onChange={(e) => set((x) => void (x.video = { ...v, kbps: +e.target.value, maxKbps: Math.round(+e.target.value * 4 / 3) }))} /> kbps</label>
+      )}
+    </div>
+  );
+}
+
+/** Expected size: instant for bitrate presets, else three short sample renders (debounced). */
+function useEstimate(project: ReturnType<typeof useEditor.getState>["project"] & object, duration: number, range: { start: number; end: number } | null) {
+  const ex = project.export;
+  const preset = EXPORT_PRESETS.find((p) => p.id === ex.preset) ?? EXPORT_PRESETS[EXPORT_PRESETS.length - 1];
+  const v = { ...preset.video, ...(ex.video ?? {}) };
+  const dur = range ? Math.max(0, range.end - range.start) : duration;
+  const [state, setState] = useState<{ bytes: number | null; method?: string; busy: boolean; error?: string }>({ bytes: null, busy: false });
+  const [jobId, setJobId] = useState<string | null>(null);
+  const job = useApp((s) => (jobId ? s.jobs[jobId] : undefined));
+  const timer = useRef<number>();
+  const key = JSON.stringify([ex.preset, ex.video, ex.reduceGrain, ex.mode, range, project.tracks, project.settings]);
+  useEffect(() => {
+    if (ex.mode !== "final") return;
+    if (v.kind === "bitrate") {
+      setState({ bytes: ((v.kbps ?? 12000) + (ex.audioKbps ?? preset.audioKbps)) * 1000 / 8 * dur * 1.01, method: "bitrate", busy: false });
+      return;
+    }
+    setState({ bytes: null, busy: true });
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      const p = { ...useEditor.getState().project!, export: { ...useEditor.getState().project!.export, range } };
+      api.estimateSize(p).then((r) => setJobId(r.jobId), () => setState({ bytes: null, busy: false, error: "Could not estimate." }));
+    }, 900);
+    return () => window.clearTimeout(timer.current);
+  }, [key]);
+  useEffect(() => {
+    if (!job) return;
+    if (job.status === "done") setState({ bytes: job.result.bytes, method: job.result.method, busy: false });
+    else if (job.status === "error") setState({ bytes: null, busy: false, error: "Could not estimate (see Jobs)." });
+  }, [job?.status]);
+  return state;
+}
+
+/** Cover / thumbnail: a frame (the playhead) with optional text, saved as a JPG in exports. */
+function CoverPanel({ playhead }: { playhead: number }) {
+  const project = useEditor((s) => s.project!);
+  const texts = project.tracks.filter((t) => t.type === "text").flatMap((t) => t.clips.filter((c) => c.text));
+  const [mode, setMode] = useState<string>(texts.length ? `clip:${texts[0].id}` : "none");
+  const [custom, setCustom] = useState("");
+  const [presetId, setPresetId] = useState("hook");
+  const [hideText, setHideText] = useState(true);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const job = useApp((s) => (jobId ? s.jobs[jobId] : undefined));
+  const busy = job && (job.status === "queued" || job.status === "running");
+  const go = () => {
+    let text: Record<string, unknown> | null = null;
+    if (mode.startsWith("clip:")) {
+      const c = texts.find((x) => `clip:${x.id}` === mode);
+      if (c) text = { text: c.text, transform: { x: c.transform.x, y: c.transform.y, scale: c.transform.scale, rotation: c.transform.rotation } };
+    } else if (mode === "custom" && custom.trim()) {
+      const pr = TEXT_PRESETS.find((p) => p.id === presetId)!;
+      text = { text: { ...pr.style, content: custom.trim() }, transform: pr.position };
+    }
+    api.exportCover(useEditor.getState().project!, playhead, text, hideText).then((r) => setJobId(r.jobId), (e) => toastError("Cover export failed", e));
+  };
+  return (
+    <div className="field cover-panel">
+      <label>Cover image (JPG)</label>
+      <div className="row" style={{ gap: 6, flexWrap: "wrap", fontSize: 12 }}>
+        <span>Frame at the playhead ({fmtTime(playhead)})</span>
+        <select className="input" style={{ height: 26 }} value={mode} onChange={(e) => setMode(e.target.value)}>
+          <option value="none">No text</option>
+          {texts.map((c) => <option key={c.id} value={`clip:${c.id}`}>Text: {String((c.text as { content?: string }).content ?? "").slice(0, 30)}</option>)}
+          <option value="custom">Custom text…</option>
+        </select>
+        {mode === "custom" && (
+          <>
+            <input className="input" style={{ width: 180 }} placeholder="Cover title" value={custom} onChange={(e) => setCustom(e.target.value)} />
+            <select className="input" style={{ height: 26 }} value={presetId} onChange={(e) => setPresetId(e.target.value)}>
+              {TEXT_PRESETS.filter((p) => p.id !== "caption").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </>
+        )}
+        <label className="row fl-check"><input type="checkbox" checked={hideText} onChange={(e) => setHideText(e.target.checked)} />Hide the timeline's text in the frame</label>
+        <button className="btn sm" onClick={go} disabled={!!busy}>{busy ? "Saving…" : "Save cover"}</button>
+        {job?.status === "done" && (
+          <a className="btn sm ghost" href={job.result.url} target="_blank" rel="noreferrer"><Icon name="image" size={12} /> {job.result.file}</a>
+        )}
+        {job?.status === "error" && <span className="error-text">{job.error}</span>}
+      </div>
     </div>
   );
 }
