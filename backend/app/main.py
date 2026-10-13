@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import captions, config, luts, media, presets_api, projects, render, system_api, templates_api, text_api
+from . import ai_models, captions, config, cutout, luts, media, presets_api, projects, render, system_api, templates_api, text_api
 from .ffmpeg_utils import ffmpeg_version, has_nvenc
 from .jobs import jobs
 
@@ -33,6 +33,8 @@ async def lifespan(app: FastAPI):
     print(f"Ligxt Video Editor running at http://127.0.0.1:{config.PORT}", flush=True)
     yield
     jobs.shutdown()
+    from . import ai_bridge
+    ai_bridge.stop()
     system_api.mark_stopped()
 
 
@@ -46,6 +48,8 @@ app.include_router(text_api.router)
 app.include_router(captions.router)
 app.include_router(templates_api.router)
 app.include_router(system_api.router)
+app.include_router(ai_models.router)
+app.include_router(cutout.router)
 
 
 @app.exception_handler(Exception)

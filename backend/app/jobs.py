@@ -1,7 +1,7 @@
 """Background job queue with progress, ETA, and cancellation.
 
-Two queues: "media" (proxies, thumbnails, waveforms; 2 workers) and "render" (exports; 1 worker,
-so exports never fight each other for the encoder).
+Three queues: "media" (proxies, thumbnails, waveforms; 2 workers), "render" (exports; 1 worker,
+so exports never fight each other for the encoder) and "ai" (AI analysis; 1 worker, one GPU task at a time).
 """
 from __future__ import annotations
 
@@ -83,6 +83,7 @@ class JobManager:
         self._pools = {
             "media": ThreadPoolExecutor(max_workers=2, thread_name_prefix="media"),
             "render": ThreadPoolExecutor(max_workers=1, thread_name_prefix="render"),
+            "ai": ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai"),  # one GPU task at a time
         }
 
     # -- state ------------------------------------------------------------

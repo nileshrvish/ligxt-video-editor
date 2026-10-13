@@ -1,0 +1,9 @@
+# The AI worker's packages, installed into the separate ai-venv by setup.ps1.
+# torch + torchvision come first from the PyTorch CUDA index (see setup.ps1); the rest from PyPI.
+# Licenses: transformers / safetensors / timm / kornia Apache-2.0, einops MIT, numpy BSD-3-Clause.
+transformers==4.46.3
+timm==1.0.15
+einops==0.8.1
+kornia==0.8.1
+safetensors==0.8.0
+numpy==2.4.6

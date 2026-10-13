@@ -126,6 +126,7 @@ export default function TextPanel({ clip }: { clip: Clip }) {
           <span className="faint" style={{ fontSize: 11 }}>{clipDuration(clip).toFixed(2)} s on the timeline</span>
         </div>
         <SafetyNote clipId={clip.id} />
+        <BehindSubject clip={clip} on={!!(s as { behindSubject?: boolean }).behindSubject} onChange={(v) => patch({ behindSubject: v })} />
       </div>
 
       <div className="prop-group">
@@ -251,6 +252,34 @@ export default function TextPanel({ clip }: { clip: Clip }) {
         </div>
         <button className="btn danger" onClick={() => st().deleteSelectedClip()}><Icon name="trash" size={14} /> Delete {isCaption ? "caption" : "text"}</button>
       </div>
+    </div>
+  );
+}
+
+/** Text between the background and the person (needs Cutout on the main-track clip under the text). */
+function BehindSubject({ clip, on, onChange }: { clip: Clip; on: boolean; onChange: (v: boolean) => void }) {
+  const key = useEditor((st) => {
+    const main = st.project?.tracks.find((t) => t.type === "video");
+    const a = clip.start, b = clip.start + clipDuration(clip);
+    const cs = (main?.clips ?? []).filter((c) => c.start < b && c.start + clipDuration(c) > a);
+    return `${cs.length}|${cs.filter((c) => c.cutout?.enabled).length}`;
+  });
+  const [any, cut] = key.split("|").map(Number);
+  const under = { any, cut };
+  return (
+    <div style={{ marginTop: 6 }}>
+      <label className="row fl-check" title="The subject (person) of the video under the text is drawn on top of the text">
+        <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} />
+        Behind the subject
+      </label>
+      {on && under.cut === 0 && (
+        <div className="faint" style={{ fontSize: 11, color: "var(--warn)" }}>
+          Turn on Cutout for the main-video clip under this text (Properties &gt; Cutout), otherwise the text stays in front.
+        </div>
+      )}
+      {on && under.cut > 0 && under.cut < under.any && (
+        <div className="faint" style={{ fontSize: 11 }}>Only the clips with Cutout on go in front of the text.</div>
+      )}
     </div>
   );
 }

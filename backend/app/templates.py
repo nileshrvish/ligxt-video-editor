@@ -218,6 +218,20 @@ def _kf_to_beats(kfs: dict, abs_start: float, B) -> dict:
     return out
 
 
+def template_cutout(cut: dict | None) -> dict | None:
+    """A clip's cutout settings as a template stores them: the look (glow, shadow, edges, subject/background
+    grades, background colour/blur) without personal media; a replacement photo/video becomes 'keep'."""
+    from .cutout import normalize
+    if not cut or not cut.get("enabled"):
+        return None
+    c = normalize(cut)
+    c["model"] = "auto"
+    if c["background"].get("type") in ("image", "video"):
+        c["background"] = {**c["background"], "type": "keep", "mediaId": None}
+    c["background"]["mediaId"] = None
+    return c
+
+
 def from_project(project: Project, name: str, *, category: str = "Beat sync", tags: list[str] | None = None,
                  description: str = "", export_preset: str | None = None) -> tuple[dict, list[str]]:
     """Build a template from a project. Returns (template, notes about what was left out)."""
@@ -257,7 +271,8 @@ def from_project(project: Project, name: str, *, category: str = "Beat sync", ta
                       "transform": tr0,
                       "keyframes": kfb,
                       "speed": cd.get("speed", 1), "transitionOut": None,
-                      "audio": {"muted": bool(cd.get("muted")), "volume": cd.get("volume", 1)} if m.get("type") == "video" else None})
+                      "audio": {"muted": bool(cd.get("muted")), "volume": cd.get("volume", 1)} if m.get("type") == "video" else None,
+                      "cutout": template_cutout(cd.get("cutout"))})
         id2slot[c.id] = len(slots) - 1
     if dropped:
         notes.append(f"Per-photo colour corrections (shots {', '.join(map(str, dropped))}) are not stored: "
@@ -692,6 +707,7 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
 
     slot_clips = []
     muted_videos = 0
+    cutout_shots = 0
     for i, s in enumerate(t["slots"]):
         mid = assign[i]
         m = metas[mid]
@@ -701,6 +717,9 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
               "transform": {**s["transform"], "crop": {"left": 0, "top": 0, "right": 0, "bottom": 0}},
               "keyframes": _kf_from_beats(s.get("keyframes"), s["startBeat"], T), "filters": copy.deepcopy(s.get("filters") or []),
               "extend": False, "speed": 1}
+        if s.get("cutout") and m["type"] in ("video", "image"):
+            cd["cutout"] = copy.deepcopy(s["cutout"])
+            cutout_shots += 1
         if m["type"] == "video":
             au = s.get("audio") or {}
             if au.get("muted") is False:
@@ -723,6 +742,10 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
         clip = Clip.model_validate(cd)
         main.clips.append(clip)
         slot_clips.append(clip)
+    if cutout_shots:
+        behind = sum(1 for x in t.get("texts") or [] if (x.get("spec") or {}).get("behindSubject"))
+        report.append(f"Cutout on {cutout_shots} shot(s){' with text behind the subject' if behind else ''}: the subjects are analysed "
+                      "(AI, cached) when the project opens or exports. Check Properties > Cutout if a shot has no clear person.")
     if muted_videos:
         report.append(f"{muted_videos} video shot(s) play without their own sound so the song carries the edit "
                       f"(select a clip and untick Mute to bring it back).")

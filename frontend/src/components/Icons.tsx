@@ -1,6 +1,8 @@
 // Small inline icon set (stroke icons, 24x24 viewBox).
 const paths: Record<string, string> = {
   plus: "M12 5v14M5 12h14",
+  gear: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1",
+  wand: "M4 20L15 9M14 4v2M19 9h2M17.5 5.5l1.4-1.4M18 13l1.4 1.4M10 5.5L8.6 4.1",
   film: "M4 4h16v16H4zM8 4v16M16 4v16M4 8h4M4 12h4M4 16h4M16 8h4M16 12h4M16 16h4",
   image: "M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5M15 9.5a1 1 0 1 0 0-.01",
   music: "M9 18V6l11-2v12M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",

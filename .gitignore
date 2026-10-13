@@ -14,3 +14,6 @@ user_luts/
 presets/
 models/whisper/
 .ligxt-running
+ai-venv/
+models/ai/
+ai_settings.json

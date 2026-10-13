@@ -6,6 +6,7 @@ import type { MediaMeta } from "../types";
 import { fmtTime, projectDuration } from "../util";
 import { Icon } from "./Icons";
 import TransformHandles from "./TransformHandles";
+import { CutoutPickLayer } from "./CutoutPanel";
 import TextEditBox from "./TextEditBox";
 import { SafetyBadge, SafetyBoxes } from "./SafeAreas";
 
@@ -90,6 +91,7 @@ function ProgramMonitor() {
   const [scopes, setScopes] = useState(() => readFlag("ligxt.scopes", false));
   const compare = useEditor((s) => s.compare);
   const colorPick = useEditor((s) => s.colorPick);
+  const cutoutPick = useEditor((s) => !!s.cutoutPick);
   const editingText = useEditor((s) => s.editingText);
   useEffect(() => {
     const e = engineRef.current;
@@ -131,6 +133,7 @@ function ProgramMonitor() {
     engine.onBuffering = (b) => setBuffering(b);
     engineRef.current = engine;
     (window as unknown as { __ligxtPreview?: PreviewEngine }).__ligxtPreview = engine;
+    (window as unknown as { __ligxtStore?: typeof useEditor }).__ligxtStore = useEditor; // browser tests
     return () => {
       engine.destroy();
       engineRef.current = null;
@@ -183,7 +186,8 @@ function ProgramMonitor() {
             {buffering && <span className="preview-label" style={{ top: 8, left: 8 }}>Loading…</span>}
             {shuttleLabel && <span className="shuttle-badge">{shuttleLabel}</span>}
             {compare != null && <CompareDivider value={compare} width={fw} />}
-            {compare == null && !colorPick && !editingText && <TransformHandles fw={fw} fh={fh} />}
+            {compare == null && !colorPick && !editingText && !cutoutPick && <TransformHandles fw={fw} fh={fh} />}
+            {cutoutPick && <CutoutPickLayer fw={fw} fh={fh} />}
             {editingText && <TextEditBox fw={fw} />}
             {colorPick && <div className="pv-pick" title="Click a colour to keep" onClick={pick} />}
           </div>

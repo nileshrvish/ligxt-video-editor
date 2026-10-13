@@ -432,3 +432,16 @@ button.jobs-pill { border: 0; cursor: pointer; font: inherit; }
   box-shadow: 0 10px 30px rgba(0,0,0,.5); padding: 10px; display: flex; flex-direction: column; gap: 10px; }
 .job-row { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 button.jobs-pill { border: 0; cursor: pointer; font: inherit; }
+
+/* ---- Phase 9: settings + cutout */
+.set-card { background: var(--bg-1, #15151c); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+.set-row { display: flex; align-items: center; gap: 14px; justify-content: space-between; flex-wrap: wrap; font-size: 13px; }
+.set-row > b { min-width: 150px; font-weight: 600; }
+.set-warn { color: var(--warn); font-size: 13px; }
+.set-model { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
+.set-model:first-child { border-top: 0; }
+.settings code { background: var(--bg-2); padding: 1px 5px; border-radius: 4px; }
+.cut-status { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; background: var(--bg-2); border-radius: 8px; }
+.pick-dot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); pointer-events: none; }
+.pick-dot.on { background: #34c759; }
+.pick-dot.off { background: #ff3b30; }

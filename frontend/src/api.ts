@@ -101,6 +101,13 @@ export const api = {
   savePreset: (name: string, filters: import("./types").Filter[]) => req<{ id: string; name: string }>("POST", "/api/presets", { name, filters }),
   deletePreset: (id: string) => req<{ ok: boolean }>("DELETE", `/api/presets/${id}`),
   cancelJob: (id: string) => req<{ ok: boolean }>("POST", `/api/jobs/${id}/cancel`),
+  aiStatus: (refresh = false) => req<AiStatus>("GET", `/api/ai/status${refresh ? "?refresh=true" : ""}`),
+  aiSettings: (body: Partial<AiStatus["settings"]>) => req<AiStatus["settings"]>("PUT", "/api/ai/settings", body),
+  downloadModel: (id: string) => req<{ jobId: string }>("POST", `/api/ai/models/${encodeURIComponent(id)}/download`),
+  deleteModel: (id: string) => req<{ ok: boolean }>("DELETE", `/api/ai/models/${encodeURIComponent(id)}`),
+  clearCutoutCache: () => req<{ freed: number }>("DELETE", "/api/ai/cutout-cache"),
+  cutoutPick: (mediaId: string, t: number, points: { x: number; y: number; label: number }[]) =>
+    req<{ jobId: string }>("POST", "/api/cutout/pick", { mediaId, t, points }),
   openFolder: (path?: string) => req<{ ok: boolean }>("POST", "/api/system/open-folder", { path: path ?? null }),
 };
 
@@ -132,3 +139,17 @@ export function uploadMedia(
 }
 
 export type { Job };
+
+export interface AiModel {
+  id: string; name: string; task: string; license: string; source: string; about: string;
+  downloadBytes?: number; installed?: boolean; diskBytes: number; jobId?: string | null; deletable?: boolean;
+}
+export interface AiStatus {
+  settings: { device: "auto" | "cpu"; budgetGB: number; personModel: string };
+  env: { installed: boolean; error?: string; python?: string; torch?: string | null; cuda?: boolean; device?: string;
+    vramTotal?: number; vramFree?: number; cudaVersion?: string };
+  models: AiModel[];
+  other: AiModel[];
+  totalBytes: number;
+  cacheBytes: number;
+}

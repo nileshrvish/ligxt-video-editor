@@ -1,3 +1,4 @@
+import CutoutPanel from "./CutoutPanel";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { toastError, useApp } from "../store/app";
@@ -151,6 +152,8 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
       {isVisual && m && m.type !== "audio" && <MotionPanel clip={clip} trackType={trackType} m={m} />}
 
       {(m?.hasAudio ?? false) && <AudioSection clip={clip} trackType={trackType} m={m!} />}
+
+      {isVisual && m && (m.type === "video" || m.type === "image") && <CutoutPanel clip={clip} trackType={trackType} m={m} />}
 
       {isVisual && m && m.type !== "audio" && <FiltersPanel clip={clip} trackId={trackId} />}
 

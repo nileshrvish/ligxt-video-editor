@@ -2,9 +2,10 @@ import { Component, useEffect, useState, type ReactNode } from "react";
 import { ConnectionBanner, Toasts } from "./components/Common";
 import Editor from "./components/Editor";
 import Home from "./components/Home";
+import Settings from "./components/Settings";
 import { connectEvents } from "./store/app";
 
-/** Hash routes: "#/" home, "#/p/<projectId>" editor. */
+/** Hash routes: "#/" home, "#/p/<projectId>" editor, "#/settings" settings. */
 function useRoute(): string {
   const [hash, setHash] = useState(window.location.hash || "#/");
   useEffect(() => {
@@ -45,7 +46,7 @@ export default function App() {
     <ErrorBoundary>
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
         <ConnectionBanner />
-        <div style={{ flex: 1, minHeight: 0 }}>{m ? <Editor key={m[1]} projectId={m[1]} /> : <Home />}</div>
+        <div style={{ flex: 1, minHeight: 0 }}>{m ? <Editor key={m[1]} projectId={m[1]} /> : route.startsWith("#/settings") ? <Settings /> : <Home />}</div>
       </div>
       <Toasts />
     </ErrorBoundary>

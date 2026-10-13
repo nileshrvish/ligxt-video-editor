@@ -42,6 +42,8 @@ export interface Clip {
   extend?: boolean;
   /** Speed ramp: speed (0.1-4x) along the clip, u = 0..1 of its timeline length. */
   speedRamp?: { points: { u: number; speed: number }[]; preset?: string } | null;
+  /** Subject cutout (AI matte) and the effects built on it; see cutout/model.ts. */
+  cutout?: import("./cutout/model").Cutout | null;
   [extra: string]: unknown;
 }
 

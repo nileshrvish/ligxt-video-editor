@@ -7,7 +7,7 @@ import {
 } from "../grade/stack";
 import { hueSat } from "../grade/math";
 import { toastError, useApp } from "../store/app";
-import { useEditor } from "../store/editor";
+import { useEditor, type FilterScope } from "../store/editor";
 import type { Clip, Filter } from "../types";
 import { Icon } from "./Icons";
 
@@ -35,7 +35,12 @@ function Slider({ label, value, min, max, step, onChange, fmt }: {
 }
 
 export default function FiltersPanel({ clip, trackId }: { clip: Clip; trackId: string }) {
-  const filters = clip.filters ?? [];
+  // With a cutout, the grade can apply to the whole clip, only the subject, or only the background.
+  const [scopeRaw, setScope] = useState<FilterScope>("clip");
+  const cutOn = !!clip.cutout?.enabled && !clip.adjustment;
+  const scope: FilterScope = cutOn ? scopeRaw : "clip";
+  const filtersOf = (c?: Clip) => (!c ? [] : scope === "clip" ? c.filters ?? [] : (scope === "subject" ? c.cutout?.subjectFilters : c.cutout?.backgroundFilters) ?? []);
+  const filters = filtersOf(clip);
   const st = useEditor.getState;
   const toast = useApp((s) => s.toast);
   const clipboard = useEditor((s) => s.filterClipboard);
@@ -52,7 +57,7 @@ export default function FiltersPanel({ clip, trackId }: { clip: Clip; trackId: s
   };
   useEffect(refresh, []);
 
-  const set = (next: Filter[], final = true) => st().setFilters(clip.id, next, final);
+  const set = (next: Filter[], final = true) => st().setFilters(clip.id, next, final, scope);
   const adj = adjustOf(filters);
   const preset = presetOf(filters);
   const lut = lutOf(filters);
@@ -66,7 +71,7 @@ export default function FiltersPanel({ clip, trackId }: { clip: Clip; trackId: s
         return;
       }
       // The clip may have changed since the button was pressed: edit its current filters.
-      const now = st().project!.tracks.flatMap((t) => t.clips).find((c) => c.id === clip.id)?.filters ?? filters;
+      const now = filtersOf(st().project!.tracks.flatMap((t) => t.clips).find((c) => c.id === clip.id)) ?? filters;
       set(setSelective(now, { hue: Math.round(h) }));
     });
   const count = filters.length;
@@ -93,7 +98,7 @@ export default function FiltersPanel({ clip, trackId }: { clip: Clip; trackId: s
     <div className="prop-group fl" data-track={trackId}>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <div className="label">Colour & effects {count > 0 && <span className="fl-badge">{count}</span>}</div>
-        <div className="row" style={{ gap: 2 }}>
+        <div className="row" style={{ gap: 2, display: scope === "clip" ? undefined : "none" }}>
           <button className="btn ghost icon xs" title="Copy filters" onClick={() => st().copyFilters(clip.id)} disabled={!count}><Icon name="copy" size={12} /></button>
           <button className="btn ghost xs" title="Paste filters onto this clip" onClick={() => st().pasteFilters([clip.id])} disabled={!clipboard}>Paste</button>
           <button className="btn ghost xs" title="Give every other clip these filters" onClick={applyToAll} disabled={!count}>All</button>
@@ -101,6 +106,21 @@ export default function FiltersPanel({ clip, trackId }: { clip: Clip; trackId: s
         </div>
       </div>
 
+      {cutOn && (
+        <div className="prop-row" title="Cutout is on: grade the whole clip, only the subject, or only the background">
+          <label>Apply to</label>
+          <div className="seg">
+            {(["clip", "subject", "background"] as FilterScope[]).map((k) => {
+              const cnt = (k === "clip" ? clip.filters : k === "subject" ? clip.cutout?.subjectFilters : clip.cutout?.backgroundFilters)?.length ?? 0;
+              return (
+                <button key={k} className={scope === k ? "on" : ""} onClick={() => setScope(k)}>
+                  {k === "clip" ? "Whole clip" : k === "subject" ? "Subject" : "Background"}{cnt ? ` (${cnt})` : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {section("presets", "Presets", preset ? PRESETS[preset.name]?.label ?? preset.name : undefined)}
       {open.presets && (
         <div className="fl-body">

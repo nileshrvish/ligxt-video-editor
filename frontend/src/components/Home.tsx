@@ -143,6 +143,9 @@ export default function Home() {
           <button className="btn ghost sm" onClick={() => api.openFolder().catch((e) => toastError("Could not open folder", e))}>
             <Icon name="folder" size={14} /> Exports folder
           </button>
+          <button className="btn ghost sm" onClick={() => navigate("/settings")} title="AI tools, models and disk usage">
+            <Icon name="gear" size={14} /> Settings
+          </button>
         </div>
         {projects === null ? (
           <div className="faint">Loading…</div>

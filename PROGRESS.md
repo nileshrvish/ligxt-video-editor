@@ -15,8 +15,9 @@ Read this first at the start of every session.
 | 6 | Text (fonts, styles, on-canvas editing, animations, presets), auto-captions (faster-whisper GPU, karaoke), export presets + size estimate + cover, safe-area warnings (faces + text), photo extension | **Done** (2026-10-13) |
 | 7 | Style templates: save as template, gallery, use-template wizard (beat fitting, face-aware motion, colour matching, text placement), management, .zip export/import, 3 built-ins | **Done** (2026-10-13) |
 | 8 | Polish and stability (v1.0): video slots, drop detection + energy curve, accent suggestion, crash recovery, tab locks, relink, disk checks, tray launcher + shortcut, start.sh, version, tour, media cleanup, recent exports, jobs popover, timeline performance, bug bash | **Done** (2026-10-13), tagged `v1.0` |
+| 9 | AI foundation (separate ai-venv worker, model manager + Settings page) and subject cutout: person matting (BiRefNet) + click-to-select objects (SAM 2.1), temporal smoothing, edges, background replace, glow/outline with beat pulse, drop shadow, subject/background-only grades, text behind the subject, templates; Cutout Demo | **Done** (2026-10-13), v1.1.0 |
 
-Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (76) and `cd frontend; npm test` (108).
+Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (89) and `cd frontend; npm test` (113). The AI tools: `ai-venv` (built by setup.ps1).
 Git: commit to `master` and push after each tested phase or fix.
 
 ## Phase 1: what exists
@@ -145,9 +146,47 @@ Git: commit to `master` and push after each tested phase or fix.
 - **Performance** (3-minute, 64-clip project with a 4K phone video, Chrome 1366x768): edits use immer structural sharing (only changed clips re-render), safety checks deferred, waveform canvas capped at 4096 px, ruler ticks as CSS gradients. Drag 116 -> 21 ms per move, zoom 408 -> 41 ms, split 75 -> 6 ms, undo 50 -> 19 ms; preview playback and scrubbing were already smooth.
 - Tests: `backend/tests/test_phase8.py` (locks, relink, disk space, recent exports + re-export, media cleanup, energy + drop, accent + generate, muted video slots).
 
+## AI feature rules (apply to every AI phase)
+
+Set by the user in Phase 9; every later AI feature follows them.
+
+- **Hardware**: RTX 4050 Laptop, 6 GB VRAM. Every model must fit, with batch sizes or tiling tuned to stay under ~4.5 GB (Settings > GPU memory limit; the worker measures the first batch and sizes the rest, halves the batch on out-of-memory). Fall back to the CPU with a clear warning.
+- **Environment**: don't break the existing app. Models that need PyTorch run in the AI worker (`ai_worker/`) inside the separate `ai-venv`, started by the backend as a subprocess (`ai_bridge.py`, JSON lines), so the editor keeps working if the AI setup fails. `setup.ps1` builds `ai-venv` (optional step, never fatal; keeps the PowerShell 5.1 fixes: `$LASTEXITCODE` checks, no `$ErrorActionPreference = "Stop"`).
+- **Licenses**: check every model's and library's license before using it. Personal non-commercial use must be allowed. GPL or unclear: tell the user before using it and note it in the README. Prefer MIT / Apache / BSD.
+- **Jobs**: every AI task is a background job (queue "ai", one GPU task at a time) with progress, ETA and Cancel, never freezing the UI. Results are cached per clip and settings, so repeat previews are instant.
+- **Models**: downloaded on first use with progress and size shown, pinned to a revision and verified by SHA-256 (`ai_models.CATALOG`), deletable in Settings, which shows disk usage per model.
+- **Preview vs export**: the preview may use a faster, lower-quality version, but the export uses full quality, and the two must line up in position and timing; measure it (pixel comparison of a preview frame and the exported frame, with a shift search).
+
+## Phase 9: what exists
+
+- **AI worker** (`ai_worker/worker.py`, runs with `ai-venv\Scripts\python.exe`): JSON-lines protocol on stdin/stdout (`probe`, `matte`, `segment`, `cancel`, `shutdown`); library prints go to stderr; exits after 180 s idle (frees VRAM). Windows gotcha: a thread blocked in `ReadFile` on the stdin pipe deadlocks DLL loading in other threads (importing numpy/torch hung), so stdin is polled with `PeekNamedPipe`. `ai_bridge.py` starts it on demand, serialises calls, forwards progress, cancels (kills it if it doesn't stop within 8 s).
+- **Model manager** (`ai_models.py`, `/api/ai/*`): catalog with pinned revisions + SHA-256 of every file (BiRefNet matting, lite, dynamic: MIT; SAM 2.1 small: Apache-2.0), download job with progress/speed, `.verified` marker, delete, settings (`ai_settings.json`: device auto/cpu, VRAM budget 1.5-5.5 GB, default person model), environment probe (torch, CUDA, GPU, VRAM, sam2), other models on disk (Whisper, YuNet), cutout cache size/clear. **Settings page** (`#/settings`, Home > Settings).
+- **Matting** (`ai_worker/matting.py`): ffmpeg decodes the same frames as the export (rotation, HDR tone map, accurate seek a quarter frame before frame k0 + `fps=...:round=near`), BiRefNet in fp16 batches sized to the budget, **fast guided filter** upsampling to the source size (hair/finger edges follow the full-resolution picture; solid areas kept solid), lossless FFV1 gray output; per-frame coverage for "no person found".
+- **Click to select** (`ai_worker/segment.py`): SAM 2.1 small (Meta, Apache-2.0; code installed from GitHub at commit 2b90b9f5 without the CUDA extension). Clicks (normalised source x/y at a source time, positive/negative) on one or more frames; tracked forwards and backwards through the window; masks upsampled with the same guided filter. One-frame "Preview selection" job (`/api/cutout/pick`) returns the frame with the selection tinted.
+- **Cutout pipeline** (`cutout.py`): raw analysis for a *window* of source frames [k0, k1) (the clip's span + 1 s margin, reused when a later trim still fits), cached in `cache/<media>/cutout/raw1_<model[-pointhash]>_<d|n>_<k0>_<k1>.mkv` + json; refine stage 1 (cached per strength): **flow-aligned temporal smoothing** (DIS optical flow at 1/4 size; median of previous/this/next warped onto this frame, then a gated blend with the previous smoothed frame); stage 2: grow/shrink (ellipse dilate/erode), feather (Gaussian), written as the full-size matte (FFV1, export) and a **preview proxy with the picture on the left and the matte on the right** (one video: picture and matte can't drift). `POST /api/cutout/prepare` returns ready/running/missing/needsPoints and starts the job; job dedupe per work key; old refined versions pruned.
+- **Export** (`cutout_render.py`, `render.py`): the matte goes through `layers.source_raw` with in/out shifted by k0/fps (speed, ramps, reverse, freeze identical to the picture) and `layers.motion_layer` (the clip's keyframed transform), then: background (keep / blur / colour / image / video, + background-only grade) -> shadow -> glow (gblur + colorlevels; beat pulse via sendcmd per frame: wider + brighter on each beat, decaying over 0.22 s) -> subject (subject-only grade, alpha = matte). Cutout clips always use the layer path. Transitions: both sides keep their cutout look; the subject matte goes through the same xfade/whip. **Text behind the subject**: for a text track with such clips, the picture before the track is kept, the behind texts are drawn, then that picture cut out by the main-track matte (`mcat`, concatenated like the main track) is drawn on top; then the track's other texts. Overlay-track clips: background keep or remove, glow/shadow under the layer. Missing analysis runs as a plan task inside the export job (first half of the progress bar); without the AI tools the export says so.
+- **Preview** (`player/cutout.ts` WebGL2, `player/engine.ts`): cutout clips play the picture|matte proxy (time shifted by the window), split per frame into picture and matte canvases; the matte goes through the same `drawLayer` matrix path; the compositor mirrors the export order and maths (`cutout/model.ts` = `cutout.py`: glow levels, pulse, beats; checked against `shared/cutout_cases.json`); background video in its own muted element; text-behind-subject pass with the canvas matte (also through transitions).
+- **UI**: Properties > Cutout (AI): on/off, Subject (Person auto / Object click), model, status ("Analyzing subject… 40%", Cancel, cached ✓, "No person found in this clip", CPU warning), Edges (Smooth, Shrink/grow, Feather, Hair detail), Background, Glow / outline (colour, width, softness, opacity, pulse on the beat / steady), Drop shadow; Colour & effects > *Apply to: Whole clip / Subject / Background*; text clips: *Behind the subject* (with a hint when no cutout clip is under it); object picking on the preview (green/red dots, Shift+click = not this).
+- **Templates** store the cutout look per slot (no personal media: a photo/video background becomes "keep"; model "auto") and text behind the subject; generation re-applies it and reports it.
+- **Media cleanup** counts a cutout's background photo/video as used.
+- Tests: `backend/tests/test_phase9.py` (13: the worker's numpy "test-key" colour-key model through the real subprocess and pipeline; window alignment; no-subject; export of every effect incl. transition + text behind; photo + overlay remove; prepare-then-export; template round trip; cancel; no AI tools; checksum-verified downloads; shared parity cases; SAM 2 click-to-select when installed), `frontend/src/cutout/model.test.ts` (5).
+
+- **Model comparison** (the user's test clips: a 1080p neon portrait and a dark 4K gym clip, 3 s each, RTX 4050, budget 4.5 GB; "jitter" = frame-to-frame alpha change beyond smooth motion, lower = less flicker):
+
+  | Model (all MIT) | 1080p fps | 4K fps | peak VRAM | gym jitter | quality notes |
+  |---|---|---|---|---|---|
+  | BiRefNet lite (matting) | 6.6 | 5.9 | 3.4-3.7 GB (batch 4) | 19.5 | fast; on the dark clip it picks up the poster and shoes and flickers |
+  | BiRefNet dynamic (matting) | 3.5 | 3.4 | 3.7-3.9 GB (batch 3) | 5.9 | keeps 9:16 aspect; keeps nearby objects (shoes) |
+  | **BiRefNet (matting)**, default | 3.0 | 2.9 | 3.0-3.1 GB (batch 2) | 6.9 | cleanest backgrounds, steadiest edges, good hair; lost part of the feet in the darkest shot |
+
+  The temporal smoothing (0.5) cut jitter by 55 % (lite) and 22 % (default) without lag. RobustVideoMatting was **not** compared: GPL-3.0 (weights unlicensed), excluded until the user approves. MODNet (Apache-2.0) weights are only on Google Drive (can't be checksum-pinned). SAM 2.1 small: 1.1 GB VRAM, tracks ~5 fps at 1080x1920.
+- **Measured preview vs export** (Cutout Demo, 4K and 1080p sources, preview canvas 229x407): best match at zero pixel shift for all four shots, on the same source frame; mean difference 3-5/255 (proxy compression and scaling).
+- **Cutout Demo** (project "Cutout Demo", the reel's song, cuts on beats 0 / 3.97 / 7.96 / 11.96 / 15.98 s): "NO EXCUSES" behind the moving lifter; neon portrait with a cyan outline pulsing on every beat (background darkened); on the drop a whip up into the curls shot with the gym replaced by the mountain-road clip (another video) + shadow; pull-ups with a B&W background and the athlete in colour. All titles clear of the Reels zones. Export `exports\Cutout Demo.mp4`; before/after images in `exports\cutout demo\`.
+- **Test clips**: the folder `C:\Users\niles\ligxt-test-media` didn't exist; the ten clips downloaded to Downloads just before the request (Pexels-style names, 4K/1080p, portrait and landscape: gym, neon portrait, roads, hands) were used (imported copies; Downloads untouched).
+
 ## Next
 
-- Waiting for the user's bug/friction list (the Phase 8 request had an empty list placeholder) and the next phase.
+- Waiting for the next phase (and the Phase 8 bug/friction list, still empty). Open question for the user: add RobustVideoMatting (GPL-3.0) for comparison?
 
 ## The user's reel ("Beat Sync Reel", project in projects\)
 
@@ -163,6 +202,8 @@ Git: commit to `master` and push after each tested phase or fix.
 
 - Phase 8 (2026-10-13): no new creative tools in this phase, so the edit is unchanged. Checked with the new analysis: the detected drop of the song (7.964 s) is exactly the reel's drop cut, and the accent suggestion picks the same orange (glasses) as the B&W breakdown. Re-exported **v6.1 Instagram** under v1.0 so it is in Recent exports with its settings (Re-export works).
 
+- Phase 9 (2026-10-13): copy **"Beat Sync Reel v7 test"** (v6.1 untouched, checked by checksum): Cutout on the first studio shot (default BiRefNet; clean edges, a little softness where the cheek meets the letters at 2x zoom). The hook at its v6.1 position behind the body was unreadable ("OR / TH…OP"), wrapped 4-line versions disappeared behind head and torso; final: split hook, "WAIT FOR" (240 px) behind the head and "THE DROP" in front, both clear of the Reels zones. Export `exports\Beat Sync Reel v7 test.mp4`; comparisons in `exports\v7 test comparison\`.
+
 ## Known issues / notes
 
 - Gotcha in PowerShell 5.1: `nativeExe | Select-Object -First 1` sets a non-zero `$LASTEXITCODE`. Capture the output to a variable first.
@@ -176,6 +217,10 @@ Git: commit to `master` and push after each tested phase or fix.
   - Built-in template cards start on the plain "1" placeholder card (the preview animates on hover).
   - Exports made before v1.0 can't be re-exported from Recent exports (no recorded settings; the button explains).
   - A read-only tab still shows the editing controls as enabled; edits are refused with a toast instead of being greyed out.
-  - The template wizard can't take files from the media library (only new files), so the same photo imported twice is two media items.
+  - Cutout: on motion-blurred limbs the matte is soft, so text behind the subject shows faintly through fast-moving arms. Subjects in very dark scenes can lose parts (feet) with the default model.
+- Cutout: during a transition the subject matte goes through the same transition, so text behind the subject follows it; a replaced background stays during the transition.
+- Cutout: overlay-track clips support background keep/remove, glow and shadow (no colour/photo/video background, no subject/background-only grade); text behind the subject uses the main track only.
+- Click-to-select uses the clicks of one or more frames but cannot be corrected mid-clip yet beyond adding clicks on other frames.
+- The template wizard can't take files from the media library (only new files), so the same photo imported twice is two media items.
   - The export dialog needs a scroll at 768 px height (the Export button is at the bottom).
 - Fixed in the bug bash: wizard drop line one beat late (and "drop comes too early") when the song's first beat is just after 0 s; misleading "choose an earlier start" at start 0; identical suggested/template accent shown twice; no hint when the selective shot has no strong colour; template report BPM differed from the wizard's; empty wizard slots invisible (now dashed, click to add files); lock dialog wording; "models\\whisper" shown with a double backslash; spacing above Recent exports.

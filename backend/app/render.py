@@ -27,6 +27,8 @@ from .jobs import JobContext, jobs
 from .media import load_meta, original_path
 from .models import Clip, Project
 from .projects import load_project
+from . import cutout as CU
+from . import cutout_render as CR
 from . import layers as LY
 from . import motion as MO
 from . import text as TX
@@ -195,17 +197,24 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
 
     metas: dict[str, dict] = {}
     gone: list[str] = []
+    def cut_of(c: Clip) -> dict | None:
+        cut = getattr(c, "cutout", None)
+        return CU.normalize(cut) if CU.active(cut) and c.mediaId else None
+
     for t in project.tracks:
         for c in t.clips:
-            if c.mediaId and c.mediaId not in metas:
-                m = load_meta(c.mediaId)
+            bgm = ((cut_of(c) or {}).get("background") or {}).get("mediaId") if t.type in ("video", "overlay") else None
+            for mid_ in (c.mediaId, bgm):
+                if not mid_ or mid_ in metas:
+                    continue
+                m = load_meta(mid_)
                 if not m:
                     gone.append(f"a file used on '{t.name or t.type}' at {c.start:.1f} s (its media folder was deleted)")
-                    metas[c.mediaId] = {}
+                    metas[mid_] = {}
                     continue
                 if not original_path(m).exists():
                     gone.append(f"'{m['name']}'")
-                metas[c.mediaId] = m
+                metas[mid_] = m
     if gone:
         raise RenderError(f"{len(gone)} media file(s) are missing (moved or deleted): {', '.join(gone[:6])}"
                           f"{' and more' if len(gone) > 6 else ''}. In the Media panel, click 'Relink' on each missing file "
@@ -272,6 +281,54 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     g = Graph()
     segs_v: list[str] = []
     segs_a: list[str] = []
+    segs_m: list[str] = []  # main-track canvas mattes, parallel to segs_v (only for text behind the subject)
+
+    # ---- cutout (subject mattes from the AI analysis; see cutout.py / cutout_render.py)
+    cx = CR.Ctx(g, W, H, fps, workdir, rs, cubes, CU.timeline_beats(project.model_dump(mode="json"), metas))
+    cut_infos: dict[str, dict] = {}
+    cut_missing: list[str] = []
+
+    def cut_info(c: Clip, before: float = 0.0, after: float = 0.0) -> dict | None:
+        """The clip's cutout settings + matte file (analysis queued as a plan task if not cached)."""
+        cut = cut_of(c)
+        m = metas.get(c.mediaId or "") or {}
+        if not cut or m.get("type") not in ("video", "image"):
+            return None
+        key = f"{c.id}|{before:.4f}|{after:.4f}"
+        if key in cut_infos:
+            return cut_infos[key]
+        span = None if m["type"] == "image" else CU.needed_span(c.model_dump(), before, after)
+        info = CR.matte_info(m, cut, span)
+        info["cut"] = cut
+        if not info["ready"]:
+            cut_missing.append(f"'{m['name']}'")
+            label = f"Cutout: {m['name'][:28]}"
+
+            def task(wd, ctx=None, m=m, cut=cut, span=span):
+                CU.ensure(m, cut, span, ctx)
+            task.wants_ctx = True  # type: ignore[attr-defined]
+            plan_tasks.append((label, task))
+        cut_infos[key] = info
+        return info
+
+    behind_any = any(t.type == "text" and not t.hidden and any((c.text or {}).get("behindSubject") for c in t.clips)
+                     for t in project.tracks)
+    need_mcat = behind_any and bool(main) and any(cut_of(c) for c in clips)
+
+    def bg_source(mid_: str, tau0: float, nf: int) -> str:
+        """A cutout background from another photo/video: cover-fitted to the canvas, playing from the clip's start."""
+        bm = metas[mid_]
+        if bm.get("type") == "image":
+            raw_b, _ = LY.source_raw(g, {}, bm, str(original_path(bm)), 0.0, nf, fps, lambda tau: 0, want_audio=False)
+        else:
+            cdb = {"inPoint": 0.0, "outPoint": float(bm.get("duration") or 0), "speed": 1}
+            raw_b, _ = LY.source_raw(g, cdb, bm, str(original_path(bm)), tau0, nf, fps,
+                                     lambda tau, t0=tau0: int(round((tau - t0) * fps)), want_audio=False,
+                                     tonemap=TONEMAP + "," if bm.get("hdr") else "")
+        fitted_b = fit_chain(g, raw_b, "fill", W, H, bg)
+        out_b = g.label("cbg")
+        g.add(f"[{fitted_b}]format=yuv420p,setsar=1[{out_b}]")
+        return out_b
     main_muted = main.muted if main else False
     main_vol = main.volume if main else 1
 
@@ -284,6 +341,8 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         nf = frame_of(b_t) - frame_of(a_t)
         if nf <= 0:
             return
+        if need_mcat:
+            segs_m.append(CR.black_matte(cx, nf))
         v, a = g.label("gv"), g.label("ga")
         g.add(f"color=c={bg}:s={W}x{H}:r={_f(fps)}:d={_f(nf / fps + 0.1)},format=yuv420p,setsar=1,"
               f"trim=end_frame={nf}[{v}]")
@@ -300,7 +359,7 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         base = frame_of(c.start + tau0)
         return lambda tau: frame_of(c.start + tau) - base
 
-    def clip_source(c: Clip, t_from: float, nf: int) -> tuple[str, str]:
+    def clip_source(c: Clip, t_from: float, nf: int) -> tuple[str, str, str | None]:
         """Video + audio labels for clip `c` from timeline time `t_from`, exactly `nf` frames long.
         Reaches past the clip's in/out points (transition handles); where the source has no footage
         the first/last frame is held and the audio is silent. Applies speed/ramps/reverse/freeze,
@@ -316,7 +375,14 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                                    want_audio=bool(audible), tonemap=hdr)
         mode = c.fit or default_fit
         extend = bool(c.extend) and m["type"] == "image"
-        if MO.has_motion(cd) or extend:
+        ci = cut_info(c, incoming.get(c.id, 0.0), plans[c.id].half if c.id in plans else 0.0)
+        M = None
+        if ci:
+            # the picture and its matte take the same path (layers.motion_layer): they line up exactly
+            src_w, src_h = int(m.get("width") or W), int(m.get("height") or H)
+            mraw = CR.matte_raw(cx, cd, ci, tau0, nf, frame_at_fn(c, tau0))
+            M = CR.canvas_matte(cx, mraw, cd, src_w, src_h, mode == "fill", tau0, nf, extend=extend)
+        if MO.has_motion(cd) or extend or ci:
             src_w, src_h = int(m.get("width") or W), int(m.get("height") or H)
             if mode == "blur":
                 sp_a, sp_b = g.label("sa"), g.label("sb")
@@ -347,6 +413,13 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
             else:
                 fitted = grade_chain(g, pre_g, filt(c), W, H, rs=rs, fps=fps, t0=t_from, f0=int(round(t_from * fps)),
                                      duration=seg, workdir=workdir, cubes=cubes)
+        m_out = None
+        if ci:
+            if need_mcat:
+                M, m_keep = cx.split(M, 2, "cmo")
+                m_out = g.label("cmt")
+                g.add(f"[{m_keep}]tpad=stop_mode=clone:stop_duration={_f(seg + 0.1)},trim=end_frame={nf},setpts=PTS-STARTPTS[{m_out}]")
+            fitted = CR.composite(cx, fitted, M, ci["cut"], nf, tau0, t_from, bg_source)
         g.add(f"[{fitted}]scale=out_range=tv,format=yuv420p,tpad=stop_mode=clone:stop_duration={_f(seg + 0.1)},"
               f"trim=end_frame={nf},setpts=PTS-STARTPTS[{vout}]")
         aout = g.label("ca")
@@ -355,7 +428,7 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                   f"apad=whole_dur={_f(seg)},atrim=duration={_f(seg)},asetpts=PTS-STARTPTS[{aout}]")
         else:
             g.add(f"anullsrc=r=48000:cl=stereo,atrim=duration={_f(seg)}[{aout}]")
-        return vout, aout
+        return vout, aout, m_out
 
     # Transitions on the main track (centred on the cut, using handles).
     by_id = {c.id: c for c in clips}
@@ -380,9 +453,21 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         nf = fb - fa
         if nf <= 0 or hi <= lo:
             return
-        va, aa = clip_source(by_id[p.from_id], p.start, nf)
-        vb, ab = clip_source(by_id[p.to_id], p.start, nf)
+        va, aa, ma = clip_source(by_id[p.from_id], p.start, nf)
+        vb, ab, mb = clip_source(by_id[p.to_id], p.start, nf)
         D = nf / fps
+        if need_mcat:
+            ma, mb = ma or CR.black_matte(cx, nf), mb or CR.black_matte(cx, nf)
+            mx, mseg = g.label("tmx"), g.label("tms")
+            if p.type in WHIP_TYPES:
+                whip_chain(g, ma, mb, mx, p.type, D, W, H, fps)
+            else:
+                r1_, r2_ = g.label("tma"), g.label("tmb")
+                g.add(f"[{ma}]{TO_GBRP}[{r1_}]")
+                g.add(f"[{mb}]{TO_GBRP}[{r2_}]")
+                g.add(f"[{r1_}][{r2_}]xfade=transition={p.type}:duration={_f(D)}:offset=0[{mx}]")
+            g.add(f"[{mx}]format=gray,trim=start_frame={lo - fa}:end_frame={hi - fa},setpts=PTS-STARTPTS[{mseg}]")
+            segs_m.append(mseg)
         vx = g.label("tx")
         if p.type in WHIP_TYPES:
             whip_chain(g, va, vb, vx, p.type, D, W, H, fps)
@@ -415,9 +500,11 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                     gap(cursor, a_t)
                 nf = frame_of(b_t) - frame_of(a_t)
                 if nf > 0:
-                    v, a = clip_source(c, a_t, nf)
+                    v, a, mm_ = clip_source(c, a_t, nf)
                     segs_v.append(v)
                     segs_a.append(a)
+                    if need_mcat:
+                        segs_m.append(mm_ or CR.black_matte(cx, nf))
                 cursor = b_t
         if c.id in plans:
             p = plans[c.id]
@@ -433,6 +520,13 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     n = len(segs_v)
     joined = "".join(f"[{v}][{a}]" for v, a in zip(segs_v, segs_a))
     g.add(f"{joined}concat=n={n}:v=1:a=1[vcat][acat]")
+    mcat: list[str] = []
+    if need_mcat:
+        assert len(segs_m) == n, (len(segs_m), n)
+        g.add("".join(f"[{x}]" for x in segs_m) + f"concat=n={n}:v=1:a=0,format=gray[mcat]")
+        n_behind = sum(1 for t in project.tracks if t.type == "text" and not t.hidden
+                       and any((c.text or {}).get("behindSubject") for c in t.clips))
+        mcat = cx.split("mcat", n_behind, "mct")
 
     # Overlay tracks: composited over the main track in track order (later tracks on top).
     v_base = "vcat"
@@ -441,7 +535,25 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     for t in project.tracks:
         if t.hidden or t.type not in ("overlay", "text"):
             continue
-        for c in sorted(t.clips, key=lambda c: c.start):
+        order = sorted(t.clips, key=lambda c: c.start)
+        subject_pass = None
+        if t.type == "text" and need_mcat and mcat and any((c.text or {}).get("behindSubject") for c in order):
+            behind = [c for c in order if (c.text or {}).get("behindSubject")]
+            order = behind + [None] + [c for c in order if not (c.text or {}).get("behindSubject")]
+            keep_, pic_ = g.label("sbk"), g.label("sbp")
+            g.add(f"[{v_base}]split[{keep_}][{pic_}]")
+            v_base = keep_
+            wins = "+".join(f"between(t,{_f(max(c.start, r0) - r0 - OFFSET_EPS)},{_f(min(c.start + clip_duration(c), r1) - r0)})"
+                            for c in behind)
+            subject_pass = (pic_, mcat.pop(0), wins)
+        for c in order:
+            if c is None:  # the subject, back on top of the text behind it
+                pic_, mm_, wins = subject_pass
+                sub_, out = g.label("sbs"), g.label("vb")
+                g.add(f"[{pic_}][{mm_}]alphamerge[{sub_}]")
+                g.add(f"[{v_base}][{sub_}]overlay=0:0:format=auto:enable='{wins}'[{out}]")
+                v_base = out
+                continue
             if t.type == "text":
                 if not c.text or clip_duration(c) <= EPS:
                     continue
@@ -527,16 +639,31 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                 raw = grade_chain(g, pre_g, filt(c), gw, gh, rs=rs, fps=fps, t0=a_t, f0=int(round(a_t * fps)),
                                   duration=seg, workdir=workdir, cubes=cubes)
                 src_w, src_h, rect = gw, gh, (0, 0, gw, gh)
-            if c.extend and m["type"] == "image" and rect is None:
+            ext_on = bool(c.extend and m["type"] == "image" and rect is None)
+            if ext_on:
                 lay = ext_layers(c, m, raw, cd, src_w, src_h, fill, tau0, nf)
             else:
                 lay = LY.motion_layer(g, raw, cd, src_w, src_h, fill, W, H, tau0, fps, nf, workdir, rect=rect)
-            ov = g.label("ov")
-            g.add(f"[{lay}]{layer_start(frame_of(a_t))}[{ov}]")
-            out = g.label("vb")
-            g.add(f"[{v_base}][{ov}]overlay=0:0:enable='between(t,{_f(offset - OFFSET_EPS)},{_f(offset + seg - OFFSET_EPS)})':"
-                  f"eof_action=pass:format=auto[{out}]")
-            v_base = out
+            layers_ = [lay]
+            ci = cut_info(c)
+            if ci:
+                mraw = CR.matte_raw(cx, cd, ci, tau0, nf, frame_at_fn(c, tau0))
+                if rect is not None:  # graded at its fitted size: the matte gets the same crop + scale
+                    x0_, y0_, cw_, ch_ = LY.rounded_rect(int(m.get("width") or W), int(m.get("height") or H),
+                                                         c.transform.crop.model_dump(), fill, W, H)
+                    mr2 = g.label("mrc")
+                    g.add(f"[{mraw}]crop={cw_}:{ch_}:{x0_}:{y0_}:exact=1,scale={src_w}:{src_h},format=gray[{mr2}]")
+                    mraw = mr2
+                M = CR.canvas_matte(cx, mraw, cd, src_w, src_h, fill, tau0, nf, rect=rect, extend=ext_on)
+                under, lay = CR.overlay_layers(cx, lay, M, ci["cut"], nf, a_t)
+                layers_ = under + [lay]
+            for lay_ in layers_:
+                ov = g.label("ov")
+                g.add(f"[{lay_}]{layer_start(frame_of(a_t))}[{ov}]")
+                out = g.label("vb")
+                g.add(f"[{v_base}][{ov}]overlay=0:0:enable='between(t,{_f(offset - OFFSET_EPS)},{_f(offset + seg - OFFSET_EPS)})':"
+                      f"eof_action=pass:format=auto[{out}]")
+                v_base = out
             # Overlay video audio is mixed in like an audio-track clip.
             if audible and raw_a:
                 lbl = g.label("oa")
@@ -593,6 +720,10 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         g.add(f"[{v_base}]format=yuv420p[vout]")
     g.add(f"[{a_final}]atrim=duration={_f(dur)},asetpts=PTS-STARTPTS[aout]")
 
+    if cut_missing:
+        from .ai_models import ai_python
+        if ai_python() is None:
+            raise RenderError(CR.needs_analysis_message(cut_missing))
     venc, abr = encoder_args(ex, preset, mode, fps)
 
     script = ";\n".join(g.lines)
@@ -697,14 +828,44 @@ def sync_check(path: Path, expected: float, fps: float) -> dict:
             f"Audio/video length mismatch: video {v:.2f}s, audio {a:.2f}s, expected {expected:.2f}s."}
 
 
+class _TaskProgress:
+    """A plan task's view of the export job: its progress fills its share of the first half of the bar."""
+
+    def __init__(self, ctx: JobContext, label: str, i: int, n: int, span: float):
+        self._ctx, self._label, self._i, self._n, self._span = ctx, label, i, n, span
+        self.job = ctx.job
+
+    def progress(self, p: float, message: str | None = None) -> None:
+        self._ctx.progress(self._span * (self._i + max(0.0, min(1.0, p))) / self._n,
+                           f"{self._label} ({self._i + 1}/{self._n})" + (f": {message}" if message else ""))
+
+    def message(self, msg: str) -> None:
+        self._ctx.message(f"{self._label}: {msg}")
+
+    def cancelled(self) -> bool:
+        return self._ctx.cancelled()
+
+    def set_process(self, proc) -> None:
+        self._ctx.set_process(proc)
+
+
+def heavy_tasks(plan: Plan) -> bool:
+    """Plan tasks that take real time (AI analysis): they get the first half of the progress bar."""
+    return any(getattr(fn, "wants_ctx", False) for _, fn in plan.tasks)
+
+
 def run_tasks(plan: Plan, rdir: Path, ctx: JobContext | None = None) -> None:
-    """Pre-render steps of a plan (text frames), in the job so the request returns at once."""
+    """Pre-render steps of a plan (text frames, cutout analysis), in the job so the request returns at once."""
+    heavy = heavy_tasks(plan)
     for i, (label, fn) in enumerate(plan.tasks):
         if ctx:
             if ctx.cancelled():
                 raise RenderError("Cancelled")
-            ctx.progress(0.0, f"Preparing {label} ({i + 1}/{len(plan.tasks)})")
-        fn(rdir)
+            ctx.progress(0.5 * i / len(plan.tasks) if heavy else 0.0, f"Preparing {label} ({i + 1}/{len(plan.tasks)})")
+        if getattr(fn, "wants_ctx", False):
+            fn(rdir, _TaskProgress(ctx, label, i, len(plan.tasks), 0.5) if ctx else None)
+        else:
+            fn(rdir)
 
 
 def export_size_bound(project: Project, mode: str, duration: float) -> int:
@@ -736,11 +897,12 @@ def run_export(project: Project, mode: str, range_start: float | None, range_end
         script_path.write_text(plan.filter_script, encoding="utf-8")
         run_tasks(plan, rdir, ctx)
         args = [str(script_path) if a == "{SCRIPT}" else a for a in plan.args]
-        ctx.progress(0.0, "Rendering")
+        r0_ = 0.5 if heavy_tasks(plan) else 0.0
+        ctx.progress(r0_, "Rendering")
         tmp = plan.output.with_name(plan.output.stem + ".part.mp4")
         args[-1] = str(tmp)
         try:
-            run_ffmpeg(args, plan.duration, lambda p: ctx.progress(p * 0.98, "Rendering"),
+            run_ffmpeg(args, plan.duration, lambda p: ctx.progress(r0_ + p * (0.98 - r0_), "Rendering"),
                        ctx.cancelled, ctx.set_process, cwd=str(rdir))
             tmp.replace(plan.output)
         except BaseException:

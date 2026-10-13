@@ -17,6 +17,9 @@ import { loadWave, type Wave } from "./waves";
 import { textOps } from "../text/anim";
 import { onTextAssets, textAsset, textAssetFor, type TextAsset } from "../text/cache";
 import { extension, onExtLoaded } from "./extend";
+import { cutoutAsset, onCutoutAssets, type CutoutAsset } from "../cutout/assets";
+import { cutoutOn, glowLevels, normalizeCutout, pulseAt, timelineBeats, type Cutout } from "../cutout/model";
+import { CutoutRenderer } from "./cutout";
 
 const PREROLL = 1.5; // seconds: load + seek upcoming clips ahead of time
 const KEEP_IDLE_MS = 4000; // drop elements unused for this long
@@ -36,6 +39,8 @@ interface Active {
   visual: boolean;
   audible: boolean;
   preroll: boolean;
+  /** Cutout on and its matte ready: the clip plays the picture|matte preview proxy. */
+  cut?: { asset: CutoutAsset; cfg: Cutout };
 }
 
 interface Slot {
@@ -103,7 +108,7 @@ export class PreviewEngine {
     });
     this.compare = useEditor.getState().compare;
     this.fx.onAsset = () => (this.dirty = true);
-    this.unsubAssets = [onTextAssets(() => (this.dirty = true)), onExtLoaded(() => (this.dirty = true))];
+    this.unsubAssets = [onTextAssets(() => (this.dirty = true)), onExtLoaded(() => (this.dirty = true)), onCutoutAssets(() => (this.dirty = true))];
     this.raf = requestAnimationFrame(this.tick);
   }
 
@@ -268,6 +273,10 @@ export class PreviewEngine {
         const audible = m.hasAudio && m.type !== "image" && !track.muted && !clip.muted && clip.volume > 0;
         if (!visual && !audible) continue;
         const a: Active = { clip, track, media: m, isMain, visual, audible, preroll };
+        if (visual && cutoutOn(clip) && (track.type === "video" || track.type === "overlay")) {
+          const asset = cutoutAsset(clip, m);
+          if (asset?.status === "ready" && asset.info) a.cut = { asset, cfg: normalizeCutout(clip.cutout) };
+        }
         if (inside && inTr && t < inTr.cut + inTr.half) a.tr = { plan: inTr, side: "B", p: (t - (inTr.cut - inTr.half)) / (2 * inTr.half) };
         if (inside && outTr && t >= outTr.cut - outTr.half) a.tr = { plan: outTr, side: "A", p: (t - (outTr.cut - outTr.half)) / (2 * outTr.half) };
         out.push(a);
@@ -316,7 +325,7 @@ export class PreviewEngine {
   private slotFor(a: Active, now: number): Slot | null {
     if (a.media.type === "image") return null;
     let slot = this.slots.get(a.clip.id);
-    const url = mediaUrl(a.media);
+    const url = a.cut && !a.cut.asset.info!.image ? a.cut.asset.info!.preview : mediaUrl(a.media);
     if (slot && slot.url !== url) {
       this.dispose(slot);
       slot = undefined;
@@ -384,6 +393,7 @@ export class PreviewEngine {
   }
 
   private sync(active: Active[], t: number, playing: boolean, rate: number, fps: number, now: number, speech: [number, number][]) {
+    for (const a of active) if (a.cut) this.syncCutBg(a, t, playing, rate, fps, now);
     for (const a of active) {
       if (a.adjust || a.text) continue;
       const slot = this.slotFor(a, now);
@@ -397,6 +407,8 @@ export class PreviewEngine {
       const speed = st.speed;
       // Past the footage (transition freeze): hold the first/last frame.
       if (a.media.type !== "image") want = Math.max(0, Math.min(want, Math.max(0, a.media.duration - 0.04)));
+      const ci = a.cut?.asset.info;
+      if (ci && !ci.image) want = Math.max(0, Math.min(want - ci.offset, ci.frames / ci.fps - 0.04)); // window file
       // Reversed and frozen clips can't be played by a media element: they're stepped frame by
       // frame (seeked) and silent in the preview. The export plays reversed audio.
       const stepped = speed <= 0;
@@ -452,6 +464,20 @@ export class PreviewEngine {
         return asset.imgs!.base;
       }
       if (a.clip.extend && a.media.type === "image" && extension(a.media.id).status === "loading") return null;
+      if (a.cut) {
+        const info = a.cut.asset.info!;
+        if (info.image && !(a.cut.asset.img?.complete && a.cut.asset.img.naturalWidth)) return null;
+        const bg = a.cut.cfg.background;
+        if (bg.type === "image" && bg.mediaId) {
+          const bm = useEditor.getState().media[bg.mediaId];
+          const bi = bm ? this.image(bm) : null;
+          if (bi && !(bi.complete && bi.naturalWidth)) return null;
+        }
+        if (bg.type === "video" && bg.mediaId) {
+          const be = this.slots.get("bg:" + a.clip.id)?.el as HTMLVideoElement | undefined;
+          if (be && be.readyState < 2) return null;
+        }
+      }
       if (a.media.type === "image") {
         const img = this.image(a.media);
         return img.complete && img.naturalWidth ? img : null;
@@ -516,27 +542,45 @@ export class PreviewEngine {
       }
       return cv.getContext("2d")!;
     };
-    /** A main-track clip as a full graded frame (or null while grading assets load). */
-    const mainFrame = (cv: HTMLCanvasElement, a: Active, src: CanvasImageSource, full: boolean): HTMLCanvasElement | null => {
+    const useCut = (a: Active) => !!a.cut && !bypass && !this.cutFx.failed;
+    /** A main-track clip as a full graded frame (or null while grading assets load). With a cutout, the
+     *  canvas matte of the clip is left in this.mattes[side] ("A"/"B"/"M"). */
+    const mainFrame = (cv: HTMLCanvasElement, a: Active, src: CanvasImageSource, full: boolean, side = "M"): HTMLCanvasElement | null => {
       const w = full ? W : cw, h = full ? H : ch;
+      const kk = full ? 1 : k;
       const c2 = sized(cv, w, h);
       clear(c2, w, h);
-      this.drawLayer(c2, a, src, p, full ? 1 : k, t);
-      if (bypass || !needsGrade(a.clip.filters)) return cv;
-      const graded = this.fx.apply(cv, a.clip.filters, this.gradeCtx(p, t, W, H));
-      if (!graded) return null;
-      if (graded !== cv) {
-        c2.setTransform(1, 0, 0, 1, 0, 0);
-        // Keyframed grade strength: the graded picture over the ungraded one (export: blend).
-        c2.globalAlpha = Math.max(0, Math.min(1, valueAt(a.clip.keyframes?.intensity, t - a.clip.start, 1)));
-        c2.drawImage(graded, 0, 0, w, h);
-        c2.globalAlpha = 1;
+      const parts = useCut(a) ? this.cutParts(a, src) : null;
+      this.drawLayer(c2, a, parts ? parts.pic : src, p, kk, t);
+      if (!bypass && needsGrade(a.clip.filters)) {
+        const graded = this.fx.apply(cv, a.clip.filters, this.gradeCtx(p, t, W, H));
+        if (!graded) return null;
+        if (graded !== cv) {
+          c2.setTransform(1, 0, 0, 1, 0, 0);
+          // Keyframed grade strength: the graded picture over the ungraded one (export: blend).
+          c2.globalAlpha = Math.max(0, Math.min(1, valueAt(a.clip.keyframes?.intensity, t - a.clip.start, 1)));
+          c2.drawImage(graded, 0, 0, w, h);
+          c2.globalAlpha = 1;
+        }
       }
-      return cv;
+      if (!parts) return cv;
+      // canvas matte: the matte through the same placement as the picture, over black
+      const mc = sized(this.matteCanvas(side), w, h);
+      mc.setTransform(1, 0, 0, 1, 0, 0);
+      mc.globalAlpha = 1;
+      mc.fillStyle = "#000";
+      mc.fillRect(0, 0, w, h);
+      this.drawLayer(mc, a, parts.matte, p, kk, t, true);
+      return this.cutComposite(cv, this.matteCanvas(side), a, p, t, kk, W, H);
     };
 
     clear(ctx, cw, ch);
     const { layers, sources } = f;
+    // Text tracks with text behind the subject (export: render.py's subject pass), and the main track's
+    // canvas matte at this frame (none = nothing is on top of the text).
+    const behind = new Set<Track>(bypass ? [] : layers.filter((a) => a.text && (a.clip.text as { behindSubject?: boolean })?.behindSubject).map((a) => a.track));
+    let mainMatte: HTMLCanvasElement | null = null;
+    const behindDone = new Set<Track>();
     if (f.inTransition) {
       const iA = layers.indexOf(f.trA!);
       const iB = layers.indexOf(f.trB!);
@@ -544,12 +588,29 @@ export class PreviewEngine {
       // zoomin magnifies A down to a single source pixel: render A at full project resolution so the
       // preview samples the same pixel as the export.
       const fullA = plan.type === "zoomin";
-      const A = mainFrame(this.layerA, layers[iA], sources[iA]!, fullA);
-      const B = mainFrame(this.layerB, layers[iB], sources[iB]!, false);
+      const A = mainFrame(this.layerA, layers[iA], sources[iA]!, fullA, "A");
+      const B = mainFrame(this.layerB, layers[iB], sources[iB]!, false, "B");
       if (!A || !B) return false;
       this.trRenderer ??= new TransitionRenderer();
       const out = this.trRenderer.render(plan.type, A, B, t - (plan.cut - plan.half), 2 * plan.half, p.settings.fps);
       ctx.drawImage(out, 0, 0);
+      if (behind.size && (useCut(layers[iA]) || useCut(layers[iB]))) {
+        // the subject matte goes through the same transition (export: the same xfade/whip on the mattes)
+        const blackOr = (a: Active, side: string, full: boolean) => {
+          if (useCut(a)) return this.matteCanvas(side);
+          const c3 = sized(this.matteCanvas(side), full ? W : cw, full ? H : ch);
+          c3.setTransform(1, 0, 0, 1, 0, 0);
+          c3.fillStyle = "#000";
+          c3.fillRect(0, 0, full ? W : cw, full ? H : ch);
+          return this.matteCanvas(side);
+        };
+        const mo = this.trRenderer.render(plan.type, blackOr(layers[iA], "A", fullA), blackOr(layers[iB], "B", false),
+          t - (plan.cut - plan.half), 2 * plan.half, p.settings.fps);
+        const mm = sized(this.matteCanvas("main"), cw, ch);
+        mm.setTransform(1, 0, 0, 1, 0, 0);
+        mm.drawImage(mo, 0, 0, cw, ch);
+        mainMatte = this.matteCanvas("main");
+      }
     }
     for (let j = 0; j < layers.length; j++) {
       const a = layers[j];
@@ -570,12 +631,42 @@ export class PreviewEngine {
         continue;
       }
       if (a.text) {
+        if (behind.has(a.track) && !behindDone.has(a.track)) {
+          // The text behind the subject: the picture so far, the behind texts, then the picture cut out by
+          // the subject matte on top again.
+          behindDone.add(a.track);
+          const pc = sized(this.behindPic, cw, ch);
+          pc.setTransform(1, 0, 0, 1, 0, 0);
+          pc.globalAlpha = 1;
+          pc.drawImage(target, 0, 0);
+          for (let i = j; i < layers.length; i++) {
+            const b = layers[i];
+            if (b.track !== a.track || !b.text || !(b.clip.text as { behindSubject?: boolean })?.behindSubject) continue;
+            const asset = f.texts.get(b);
+            if (asset) this.drawText(ctx, asset, b.clip, t, W, H, k);
+          }
+          if (mainMatte) {
+            const sub = this.cutFx.mask(this.behindPic, mainMatte);
+            if (sub) {
+              ctx.setTransform(1, 0, 0, 1, 0, 0);
+              ctx.globalAlpha = 1;
+              ctx.drawImage(sub, 0, 0, cw, ch);
+            }
+          }
+        }
+        if (behind.has(a.track) && (a.clip.text as { behindSubject?: boolean })?.behindSubject) continue; // drawn above
         const asset = f.texts.get(a);
         if (asset) this.drawText(ctx, asset, a.clip, t, W, H, k);
         continue;
       }
       if (a.isMain) {
-        if (bypass || !needsGrade(a.clip.filters)) {
+        if (useCut(a)) {
+          const fr = mainFrame(this.layerA, a, sources[j]!, false);
+          if (!fr) return false;
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(fr, 0, 0);
+          if (behind.size) mainMatte = this.matteCanvas("M");
+        } else if (bypass || !needsGrade(a.clip.filters)) {
           this.drawLayer(ctx, a, sources[j]!, p, k, t);
         } else {
           const fr = mainFrame(this.layerA, a, sources[j]!, false);
@@ -585,35 +676,222 @@ export class PreviewEngine {
         }
         continue;
       }
-      // Overlay clip: grade its own picture at its fitted size (scale 1, export: the same) before
-      // placing it with its (keyframed) transform.
-      if (bypass || !needsGrade(a.clip.filters)) {
-        this.drawLayer(ctx, a, sources[j]!, p, k, t);
+      if (useCut(a)) {
+        // Overlay cutout: the layer on its own transparent canvas + its canvas matte, then glow/shadow
+        // under it and (unless "keep") the background removed.
+        const lc = sized(this.cutLayer, cw, ch);
+        lc.setTransform(1, 0, 0, 1, 0, 0);
+        lc.clearRect(0, 0, cw, ch);
+        const parts = this.cutParts(a, sources[j]!);
+        if (!this.drawOverlay(lc, a, parts.pic, p, k, t, bypass)) return false;
+        const mc = sized(this.matteCanvas("O"), cw, ch);
+        mc.setTransform(1, 0, 0, 1, 0, 0);
+        mc.globalAlpha = 1;
+        mc.fillStyle = "#000";
+        mc.fillRect(0, 0, cw, ch);
+        this.drawOverlay(mc, a, parts.matte, p, k, t, true, true);
+        const out = this.cutFx.compose({
+          S: this.cutLayer, B: null, M: this.matteCanvas("O"), bgBlur: 0, alphaFromM: a.cut!.cfg.background.type !== "keep",
+          ...this.cutGlowShadow(a, p, t, k),
+        });
+        if (out) {
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.globalAlpha = 1;
+          ctx.drawImage(out, 0, 0, cw, ch);
+        }
         continue;
       }
-      const src = sources[j]!;
-      const [sw, sh] = this.sourceSize(src, a, W, H);
-      const fill = (a.clip.fit ?? "fit") === "fill";
-      const [x0, y0, rw, rh] = roundedRect(sw, sh, a.clip.transform?.crop, fill, W, H);
-      const f0 = Math.min(W / rw, H / rh);
-      const gw = Math.max(2, rnd((rw * f0) / 2) * 2), gh = Math.max(2, rnd((rh * f0) / 2) * 2);
-      const lw = Math.max(2, Math.round(gw * k)), lh = Math.max(2, Math.round(gh * k));
-      const c2 = sized(this.layerO, lw, lh);
-      c2.setTransform(1, 0, 0, 1, 0, 0);
-      c2.globalAlpha = 1;
-      c2.clearRect(0, 0, lw, lh);
-      c2.drawImage(src, x0, y0, rw, rh, 0, 0, lw, lh);
-      const graded = this.fx.apply(this.layerO, a.clip.filters, this.gradeCtx(p, t, gw, gh));
-      if (!graded) return false;
-      const tv = transformAt(a.clip, t - a.clip.start);
-      const m = rectMatrix([0, 0, gw, gh], W, H, tv);
-      ctx.save();
-      ctx.setTransform(k * m[0], k * m[1], k * m[2], k * m[3], k * m[4], k * m[5]);
-      ctx.globalAlpha = Math.max(0, Math.min(1, tv.opacity));
-      ctx.drawImage(graded, 0, 0, lw, lh, 0, 0, gw, gh);
-      ctx.restore();
+      if (!this.drawOverlay(ctx, a, sources[j]!, p, k, t, bypass)) return false;
     }
     return true;
+  }
+
+  /** An overlay clip: its own picture graded at its fitted size (scale 1, export: the same) before
+   *  placing it with its (keyframed) transform. `matte`: draw a matte the same way (no grade, opaque). */
+  private drawOverlay(ctx: CanvasRenderingContext2D, a: Active, src: CanvasImageSource, p: Project, k: number, t: number,
+    bypass: boolean, matte = false): boolean {
+    const { width: W, height: H } = p.settings;
+    if (bypass || !needsGrade(a.clip.filters)) {
+      this.drawLayer(ctx, a, src, p, k, t, matte);
+      return true;
+    }
+    const [sw, sh] = this.sourceSize(src, a, W, H);
+    const fill = (a.clip.fit ?? "fit") === "fill";
+    const [x0, y0, rw, rh] = roundedRect(sw, sh, a.clip.transform?.crop, fill, W, H);
+    const f0 = Math.min(W / rw, H / rh);
+    const gw = Math.max(2, rnd((rw * f0) / 2) * 2), gh = Math.max(2, rnd((rh * f0) / 2) * 2);
+    const lw = Math.max(2, Math.round(gw * k)), lh = Math.max(2, Math.round(gh * k));
+    const lo = matte ? this.layerOM : this.layerO;
+    if (lo.width !== lw || lo.height !== lh) { lo.width = lw; lo.height = lh; }
+    const c2 = lo.getContext("2d")!;
+    c2.setTransform(1, 0, 0, 1, 0, 0);
+    c2.globalAlpha = 1;
+    c2.clearRect(0, 0, lw, lh);
+    c2.drawImage(src, x0, y0, rw, rh, 0, 0, lw, lh);
+    const graded = matte ? lo : this.fx.apply(lo, a.clip.filters, this.gradeCtx(p, t, gw, gh));
+    if (!graded) return false;
+    const tv = transformAt(a.clip, t - a.clip.start);
+    const m = rectMatrix([0, 0, gw, gh], W, H, tv);
+    ctx.save();
+    ctx.setTransform(k * m[0], k * m[1], k * m[2], k * m[3], k * m[4], k * m[5]);
+    ctx.globalAlpha = Math.max(0, Math.min(1, tv.opacity));
+    ctx.drawImage(graded, 0, 0, lw, lh, 0, 0, gw, gh);
+    ctx.restore();
+    return true;
+  }
+
+  // ------------------------------------------------------------ cutout
+  private cutFx = new CutoutRenderer();
+  private cutLayer = document.createElement("canvas");
+  private behindPic = document.createElement("canvas");
+  private layerOM = document.createElement("canvas");
+  private cutCanvases = new Map<string, HTMLCanvasElement>();
+  private beatsFor: { project: Project | null; media: Record<string, MediaMeta> | null; beats: number[] } = { project: null, media: null, beats: [] };
+
+  private matteCanvas(name: string): HTMLCanvasElement {
+    let c = this.cutCanvases.get("m:" + name);
+    if (!c) this.cutCanvases.set("m:" + name, (c = document.createElement("canvas")));
+    return c;
+  }
+
+  private scratch(name: string, w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+    let c = this.cutCanvases.get(name);
+    if (!c) this.cutCanvases.set(name, (c = document.createElement("canvas")));
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const x = c.getContext("2d")!;
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.globalAlpha = 1;
+    x.filter = "none";
+    return [c, x];
+  }
+
+  /** The picture and matte of a cutout clip's current frame (videos: the two halves of the proxy). */
+  private cutParts(a: Active, src: CanvasImageSource): { pic: CanvasImageSource; matte: CanvasImageSource } {
+    const info = a.cut!.asset.info!;
+    if (info.image) return { pic: src, matte: a.cut!.asset.img! };
+    const v = src as HTMLVideoElement;
+    const w = Math.floor(v.videoWidth / 2), h = v.videoHeight;
+    const [pc, px] = this.scratch("pic:" + a.clip.id, w, h);
+    px.drawImage(v, 0, 0, w, h, 0, 0, w, h);
+    const [mc, mx] = this.scratch("mat:" + a.clip.id, w, h);
+    mx.drawImage(v, w, 0, w, h, 0, 0, w, h);
+    return { pic: pc, matte: mc };
+  }
+
+  private beats(p: Project): number[] {
+    const media = useEditor.getState().media;
+    const c = this.beatsFor;
+    if (c.project !== p || c.media !== media) this.beatsFor = { project: p, media, beats: timelineBeats(p, media) };
+    return this.beatsFor.beats;
+  }
+
+  private cutGlowShadow(a: Active, p: Project, t: number, k: number) {
+    const cfg = a.cut!.cfg;
+    let glow = null, shadow = null;
+    if (cfg.glow.enabled) {
+      const [sigma, lo, hi, op] = glowLevels(cfg.glow, pulseAt(cfg.glow.pulse, t, this.beats(p)), k);
+      glow = { sigma, lo, hi, op, color: cfg.glow.color };
+    }
+    if (cfg.shadow.enabled) {
+      const sh = cfg.shadow;
+      shadow = { sigma: Math.max(0, sh.blur) * k, dx: Math.round(sh.x) * k, dy: Math.round(sh.y) * k,
+        op: Math.max(0, Math.min(1, sh.opacity)), color: sh.color };
+    }
+    return { glow, shadow };
+  }
+
+  /** The cutout composite of a main-track clip (export: cutout_render.composite). F = the clip's frame. */
+  private cutComposite(F: HTMLCanvasElement, M: HTMLCanvasElement, a: Active, p: Project, t: number, k: number, W: number, H: number): HTMLCanvasElement | null {
+    const cfg = a.cut!.cfg;
+    const w = F.width, h = F.height;
+    const g = this.gradeCtx(p, t, W, H);
+    // subject: F with the subject-only grade
+    const [S, sx] = this.scratch("S", w, h);
+    sx.drawImage(F, 0, 0);
+    if (needsGrade(cfg.subjectFilters)) {
+      const gr = this.fx.apply(S, cfg.subjectFilters, g);
+      if (!gr) return null;
+      sx.drawImage(gr, 0, 0, w, h);
+    }
+    // background
+    const [B, bx] = this.scratch("B", w, h);
+    const bg = cfg.background;
+    let bgBlur = 0;
+    const media = useEditor.getState().media;
+    const cover = (src: CanvasImageSource, sw: number, sh: number) => {
+      const f = Math.max(w / sw, h / sh);
+      bx.drawImage(src, (w - sw * f) / 2, (h - sh * f) / 2, sw * f, sh * f);
+    };
+    if (bg.type === "color") {
+      bx.fillStyle = bg.color;
+      bx.fillRect(0, 0, w, h);
+    } else if (bg.type === "image" && bg.mediaId && media[bg.mediaId]) {
+      const img = this.image(media[bg.mediaId]);
+      bx.fillStyle = "#000";
+      bx.fillRect(0, 0, w, h);
+      cover(img, img.naturalWidth || 1, img.naturalHeight || 1);
+    } else if (bg.type === "video" && bg.mediaId) {
+      const el = this.slots.get("bg:" + a.clip.id)?.el as HTMLVideoElement | undefined;
+      bx.fillStyle = "#000";
+      bx.fillRect(0, 0, w, h);
+      if (el && el.readyState >= 2) cover(el, el.videoWidth || 1, el.videoHeight || 1);
+    } else {
+      bx.drawImage(F, 0, 0);
+      if (bg.type === "blur") bgBlur = Math.max(0.5, bg.blur) * k;
+    }
+    if (needsGrade(cfg.backgroundFilters)) {
+      const gr = this.fx.apply(B, cfg.backgroundFilters, g);
+      if (!gr) return null;
+      bx.drawImage(gr, 0, 0, w, h);
+    }
+    const out = this.cutFx.compose({ S, B, M, bgBlur, alphaFromM: true, ...this.cutGlowShadow(a, p, t, k) });
+    if (!out) return F;
+    const fx = F.getContext("2d")!;
+    fx.setTransform(1, 0, 0, 1, 0, 0);
+    fx.globalAlpha = 1;
+    fx.drawImage(out, 0, 0, w, h);
+    return F;
+  }
+
+  /** A cutout's background video: its own muted element, playing from the clip's start. */
+  private syncCutBg(a: Active, t: number, playing: boolean, rate: number, fps: number, now: number) {
+    const bg = a.cut!.cfg.background;
+    if (bg.type !== "video" || !bg.mediaId) return;
+    const m = useEditor.getState().media[bg.mediaId];
+    if (!m || m.type !== "video") return;
+    const key = "bg:" + a.clip.id;
+    let slot = this.slots.get(key);
+    const url = mediaUrl(m);
+    if (slot && slot.url !== url) {
+      this.dispose(slot);
+      slot = undefined;
+    }
+    if (!slot) {
+      const el = document.createElement("video");
+      el.preload = "auto";
+      el.muted = true;
+      el.playsInline = true;
+      el.crossOrigin = "anonymous";
+      el.src = url;
+      const mark = () => (this.dirty = true);
+      el.addEventListener("seeked", mark);
+      el.addEventListener("loadeddata", mark);
+      slot = { el, url, gain: null, lastUsed: now };
+      this.slots.set(key, slot);
+    }
+    slot.lastUsed = now;
+    const el = slot.el;
+    const want = Math.max(0, Math.min(t - a.clip.start, m.duration - 0.04));
+    if (playing && rate > 0 && !a.preroll) {
+      el.playbackRate = Math.max(0.0625, Math.min(16, rate));
+      if (el.paused) {
+        if (Math.abs(el.currentTime - want) > 0.05) el.currentTime = want;
+        el.play().catch(() => void 0);
+      } else if (Math.abs(el.currentTime - want) > 0.25 * Math.max(1, rate)) el.currentTime = want;
+    } else {
+      if (!el.paused) el.pause();
+      if (!el.seeking && Math.abs(el.currentTime - want) > 0.5 / fps) el.currentTime = want;
+    }
   }
 
   private bd = { small: document.createElement("canvas"), pad: document.createElement("canvas") };
@@ -651,6 +929,7 @@ export class PreviewEngine {
   }
 
   private sourceSize(src: CanvasImageSource, a: Active, W: number, H: number): [number, number] {
+    if (src instanceof HTMLCanvasElement) return [src.width, src.height];
     const sw = (src as HTMLVideoElement).videoWidth || (src as HTMLImageElement).naturalWidth || a.media.width || W;
     const sh = (src as HTMLVideoElement).videoHeight || (src as HTMLImageElement).naturalHeight || a.media.height || H;
     return [sw, sh];
@@ -659,18 +938,18 @@ export class PreviewEngine {
   /** Draw a clip's picture at timeline time t. Main-track clips without any transform use the plain
    *  fit/fill/blur placement (export: fit_chain); everything else goes through the shared layer
    *  matrix with the export's whole-pixel crop rect (export: layers.motion_layer). */
-  private drawLayer(ctx: CanvasRenderingContext2D, a: Active, src: CanvasImageSource, p: Project, k: number, t: number) {
+  private drawLayer(ctx: CanvasRenderingContext2D, a: Active, src: CanvasImageSource, p: Project, k: number, t: number, matte = false) {
     const { width: W, height: H } = p.settings;
     const [sw, sh] = this.sourceSize(src, a, W, H);
     const mode = a.clip.fit ?? (a.isMain ? p.settings.background.mode : "fit");
-    if (a.isMain && mode === "blur") {
+    if (a.isMain && mode === "blur" && !matte) {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(this.backdrop(src, sw, sh, W, H), 0, 0, W * k, H * k);
       ctx.restore();
     }
     const ext = a.clip.extend && a.media.type === "image" ? extension(a.media.id) : null;
-    if (a.isMain && !hasMotion(a.clip) && !ext) {
+    if (a.isMain && !hasMotion(a.clip) && !ext && !a.cut) {
       const g = layerGeometry(sw, sh, a.clip, true, p.settings.background.mode, W, H);
       ctx.save();
       ctx.translate(g.cx * k, g.cy * k);
@@ -690,7 +969,7 @@ export class PreviewEngine {
     ctx.save();
     ctx.setTransform(k * m[0], k * m[1], k * m[2], k * m[3], k * m[4], k * m[5]);
     ctx.globalAlpha = Math.max(0, Math.min(1, tv.opacity));
-    if (ext?.status === "ready") {
+    if (ext?.status === "ready" && !matte) {
       // Photo extension (export: render.ext_layers): the fill image, then the whole photo on top.
       const { fx, fy } = ext.info!;
       ctx.drawImage(ext.img!, 0, 0, ext.img!.naturalWidth, ext.img!.naturalHeight, -fx * sw, -fy * sh, sw * (1 + 2 * fx), sh * (1 + 2 * fy));

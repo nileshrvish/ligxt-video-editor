@@ -1,4 +1,8 @@
 import { create } from "zustand";
+import { normalizeCutout, type Cutout } from "../cutout/model";
+import type { PickPoint } from "../cutout/pick";
+
+export type FilterScope = "clip" | "subject" | "background";
 import { produce, setAutoFreeze } from "immer";
 
 setAutoFreeze(false); // project objects are never mutated outside commit(), freezing only costs time
@@ -81,6 +85,9 @@ interface EditorState {
   filterClipboard: Filter[] | null;
   /** Eyedropper: while set, a click on the preview reports the pixel colour here. */
   colorPick: ((rgb: [number, number, number]) => void) | null;
+  /** Click-to-select (cutout object mode): the clip being picked on the preview and the clicks so far. */
+  cutoutPick: { clipId: string; points: PickPoint[] } | null;
+  setCutoutPick: (v: { clipId: string; points: PickPoint[] } | null) => void;
   setColorPick: (fn: ((rgb: [number, number, number]) => void) | null) => void;
   /** Add a bundled sound effect with its peak on each of `times` (imports it once). */
   addSfx: (sfxId: string, times: number[], volume?: number) => Promise<number>;
@@ -99,7 +106,10 @@ interface EditorState {
   copyFilters: (clipId: string) => void;
   pasteFilters: (clipIds: string[]) => void;
   /** Replace a clip's filters. `undoable=false` while dragging a slider (wrap in begin/endGesture). */
-  setFilters: (clipId: string, filters: Filter[], undoable?: boolean) => void;
+  /** scope: the whole clip (default), or only the cutout's subject / background. */
+  setFilters: (clipId: string, filters: Filter[], undoable?: boolean, scope?: FilterScope) => void;
+  /** Edit a clip's cutout settings (created with defaults when missing). */
+  setCutout: (clipId: string, fn: (c: Cutout) => void, undoable?: boolean) => void;
   addAdjustmentLayer: () => void;
   setLastTransition: (t: { type: string; duration: number }) => void;
   duplicateSelected: () => void;
@@ -148,6 +158,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   filterClipboard: null,
   colorPick: null,
   setColorPick: (colorPick) => set({ colorPick }),
+  cutoutPick: null,
+  setCutoutPick: (cutoutPick) => set({ cutoutPick }),
   editingText: null,
   setEditingText: (editingText) => set({ editingText }),
 
@@ -460,10 +472,25 @@ export const useEditor = create<EditorState>((set, get) => ({
     });
   },
 
-  setFilters: (clipId, filters, undoable = true) =>
+  setFilters: (clipId, filters, undoable = true, scope = "clip") =>
     get().commit((d) => {
       const hit = ops.findClip(d, clipId);
-      if (hit) hit.clip.filters = filters;
+      if (!hit) return;
+      if (scope === "clip") hit.clip.filters = filters;
+      else {
+        const c = normalizeCutout(hit.clip.cutout);
+        c[scope === "subject" ? "subjectFilters" : "backgroundFilters"] = filters;
+        hit.clip.cutout = c;
+      }
+    }, undoable),
+
+  setCutout: (clipId, fn, undoable = true) =>
+    get().commit((d) => {
+      const hit = ops.findClip(d, clipId);
+      if (!hit || hit.track.locked) return;
+      const c = normalizeCutout(hit.clip.cutout);
+      fn(c);
+      hit.clip.cutout = c;
     }, undoable),
 
   addAdjustmentLayer: () => {

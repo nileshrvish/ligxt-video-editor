@@ -34,7 +34,7 @@ From a terminal:
 ./start.sh                 # Git Bash; -p 9000 for another port, -n for no browser
 ```
 
-Stop it with **Ctrl+C** in the terminal. The version (v1.0.0) is shown on the Home screen and in the keyboard-shortcuts dialog (**?**), which also has "Show the tour again".
+Stop it with **Ctrl+C** in the terminal. The version (v1.1.0) is shown on the Home screen and in the keyboard-shortcuts dialog (**?**), which also has "Show the tour again".
 
 ## Safety nets
 
@@ -45,6 +45,24 @@ Stop it with **Ctrl+C** in the terminal. The version (v1.0.0) is shown on the Ho
 - **Media cleanup** (Home): lists imported files no project uses, with their size; delete the ones you don't need.
 - **Recent exports** (Home): play, show in folder, or **Re-export** with the same settings (exports from v1.0 on).
 - **Background work**: the pill in the top bar lists every running task (proxies, exports, captions, templates) with progress, time left and Cancel; you can keep editing.
+
+## Cutout (AI): no green screen needed
+
+Select a video or photo clip and turn on **Properties > Cutout (AI) > Cut out the subject**. The subject is analysed once in the background ("Analyzing subject… 40%", with Cancel) and cached, so the preview and later exports are instant. The first use of a model downloads it (the size is shown; Settings lists every model).
+
+- **Subject**: *Person (auto)* finds people automatically; *Object (click)* lets you click any object on the preview (Shift+click = "not this"), **Preview selection** shows what is selected, and **Cut out this object** tracks it through the clip.
+- **Edges**: *Smooth* steadies the edge between frames (less flicker), *Shrink/grow* pulls the edge in or out, *Feather* softens it, *Hair detail* keeps fine edges sharp. Edge changes take seconds; the analysis is reused.
+- **Background**: keep, blur, a colour, a photo, or another video (overlay tracks: keep or remove, so only the subject shows over the tracks below).
+- **Glow / outline** around the subject: colour, width, softness (0 = crisp outline), opacity, and a pulse that is **on the beat** (from the song's detected beats) or steady.
+- **Drop shadow**: colour, opacity, blur, offset.
+- **Text behind the subject**: on a text clip, tick **Behind the subject**; the person on the main-video clip under it is drawn on top of the text.
+- **Grade only the subject or only the background**: in Colour & effects, choose *Apply to: Whole clip / Subject / Background*.
+- Works with keyframes, motion, adjustment layers and transitions; templates keep the cutout look (glow, edges, background colour/blur) and text behind the subject.
+- When there is no person, the panel says so ("No person found in this clip").
+
+**Settings** (Home > Settings): whether the AI tools are installed, the graphics card and its memory, *Run AI on* (graphics card or CPU only), the *GPU memory limit* (default 4.5 GB; batch sizes are tuned to it), the default cutout model, every model with its license, download size and disk usage (download / delete), and the cutout cache (clear).
+
+The AI runs in its own Python environment (`ai-venv`, with PyTorch + CUDA), started by Ligxt as a separate process, so the editor keeps working even if the AI setup fails. `setup.ps1` builds it; nothing else is needed.
 
 ## Folders
 
@@ -59,7 +77,9 @@ Stop it with **Ctrl+C** in the terminal. The version (v1.0.0) is shown on the Ho
 | `templates\` | Your saved templates (one folder each: template.json, preview, thumbnail) |
 | `templates_builtin\` | The three starter templates (synthesized CC0 music, placeholder previews) |
 | `fonts\`     | Bundled fonts (OFL / Apache 2.0, see `fonts\README.md`) |
-| `models\`    | Face detector; the captions speech model is downloaded into `models\whisper` |
+| `models\`    | Face detector; the captions speech model is downloaded into `models\whisper`, the AI models into `models\ai` |
+| `ai-venv\`   | The AI tools' own Python environment (PyTorch); built by `setup.ps1` |
+| `ai_worker\` | The AI worker the backend runs inside `ai-venv` |
 | `sfx\`       | Bundled sound effects (whoosh, fast whoosh, hit, riser), synthesised, CC0 |
 
 ## Keyboard shortcuts
@@ -172,6 +192,21 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 
 `models\face_detection_yunet_2023mar.onnx` is OpenCV's YuNet face detector (MIT, `models\YUNET-LICENSE.txt`). The speech model for captions is downloaded on first use from Hugging Face (Systran/faster-whisper, MIT).
 
+**AI models and libraries** (all checked before use; downloaded on first use from the pinned revision and verified by SHA-256):
+
+| What | License | Size | Source |
+|------|---------|------|--------|
+| BiRefNet (matting), default cutout model | MIT | 844 MB | huggingface.co/ZhengPeng7/BiRefNet-matting |
+| BiRefNet lite (matting), fast option | MIT | 85 MB | huggingface.co/ZhengPeng7/BiRefNet_lite-matting |
+| BiRefNet dynamic (matting) | MIT | 424 MB | huggingface.co/ZhengPeng7/BiRefNet_dynamic-matting |
+| SAM 2.1 small (click to select), Meta | Apache-2.0 | 176 MB | github.com/facebookresearch/sam2 (code pinned to commit 2b90b9f5, checkpoint from dl.fbaipublicfiles.com) |
+| PyTorch, torchvision | BSD-3-Clause | ~3 GB (ai-venv) | pytorch.org |
+| transformers, safetensors, timm, kornia | Apache-2.0 | | PyPI |
+| einops, hydra-core, iopath | MIT | | PyPI |
+| omegaconf, antlr4 runtime, portalocker, numpy | BSD-3-Clause | | PyPI |
+
+Not used: **RobustVideoMatting** is GPL-3.0 (its weights carry no separate license), so it was left out and not run; it can be added if you approve its license. **MODNet** (Apache-2.0) publishes its weights only on Google Drive, which can't be checksum-pinned reliably.
+
 `sfx\` holds sound effects synthesised from noise and sine waves by `scripts\make_sfx.py`; no recordings or samples are used, and they are released under **CC0 1.0** (see `sfx\LICENSE.md`).
 
 ## Troubleshooting
@@ -179,5 +214,8 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 - **"Cannot reach the Ligxt backend"**: Ligxt was stopped (tray > Stop Ligxt, or the terminal running `start.ps1` was closed). Start it again from the Desktop shortcut. Your last changes are offered for restore when you reopen the project.
 - **The shortcut does nothing**: see `cache\launcher.log` (for example, another program is using port 8765).
 - **A clip shows "Proxy failed"**: select the file and click **Rebuild proxy**. Export still uses the original either way.
+- **Cutout says the AI tools are not installed**: run `setup.ps1` again (it rebuilds `ai-venv` without touching anything else) and restart Ligxt. Settings > Check again shows what was found.
+- **Cutout is slow**: Settings shows whether it runs on the graphics card. On the CPU expect several seconds per frame; *BiRefNet lite* is about twice as fast as the default model.
+- **"The graphics card ran out of memory"**: close games or other GPU apps, or lower Settings > GPU memory limit.
 - **Port already in use**: `.\start.ps1 -Port 9000`.
 - **HDR iPhone footage looks washed out**: it is tone-mapped to SDR automatically in proxies and exports. If not, check that ffmpeg has `zscale` (the gyan.dev full build does).

@@ -180,6 +180,9 @@ def _used_media() -> set[str]:
             for c in t.get("clips") or []:
                 if c.get("mediaId"):
                     used.add(c["mediaId"])
+                bgm = ((c.get("cutout") or {}).get("background") or {}).get("mediaId")
+                if bgm:
+                    used.add(bgm)  # a cutout's replacement background
     return used
 
 
