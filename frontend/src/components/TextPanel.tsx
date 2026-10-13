@@ -71,6 +71,30 @@ function AnimEditor({ label, a, onChange }: { label: string; a: TextSpec["animIn
   );
 }
 
+/** One word per beat of the music under the clip: kinetic captions that land exactly on the beat. */
+function BeatSync({ clip }: { clip: Clip }) {
+  const project = useEditor((s) => s.project!);
+  const media = useEditor((s) => s.media);
+  const [every, setEvery] = useState<0.5 | 1 | 2>(1);
+  const beats = project.tracks.filter((t) => (t.type === "music" || t.type === "audio") && !t.muted)
+    .flatMap((t) => t.clips.flatMap((c) => (c.mediaId ? ops.clipBeats(c, media[c.mediaId]?.beats) : [])));
+  const update = useClipUpdate(clip.id);
+  return (
+    <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+      <button className="btn sm" disabled={beats.length < 2}
+        title={beats.length < 2 ? "Detect beats on the music first (select the music clip > Detect beats)" : "Each word appears exactly on a beat (style: Reveal + pop)"}
+        onClick={() => {
+          let n = 0;
+          update((c) => void (n = TE.syncWordsToBeats(c, beats, every)));
+          useApp.getState().toast({ kind: n ? "success" : "info", title: n ? `${n} words synced to the beat` : "No beats under this text" });
+        }}>♪ Sync words to the beat</button>
+      <select className="input" style={{ height: 24 }} value={every} onChange={(e) => setEvery(+e.target.value as 0.5 | 1 | 2)}>
+        <option value={0.5}>every half beat</option><option value={1}>every beat</option><option value={2}>every 2 beats</option>
+      </select>
+    </div>
+  );
+}
+
 export default function TextPanel({ clip }: { clip: Clip }) {
   const st = useEditor.getState;
   const update = useClipUpdate(clip.id);
@@ -191,12 +215,13 @@ export default function TextPanel({ clip }: { clip: Clip }) {
         <div className="label">Animation</div>
         <AnimEditor label="In" a={s.animIn} onChange={(p, f = true) => patch({ animIn: p }, f)} />
         <AnimEditor label="Out" a={s.animOut} onChange={(p, f = true) => patch({ animOut: p }, f)} />
+        <BeatSync clip={clip} />
         {isCaption && (
           <>
-            <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>Word highlight (follows the speech)</div>
+            <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>Word highlight (follows the words' timing)</div>
             <div className="row" style={{ gap: 6 }}>
               <select className="input" style={{ height: 24, flex: 1 }} value={s.highlight.style} onChange={(e) => patch({ highlight: { style: e.target.value } })}>
-                <option value="none">None</option><option value="color">Karaoke (colour)</option><option value="pop">Karaoke pop</option><option value="reveal">Reveal as spoken</option>
+                <option value="none">None</option><option value="color">Karaoke (colour)</option><option value="pop">Karaoke pop</option><option value="reveal">Reveal as spoken</option><option value="revealpop">Reveal + pop</option>
               </select>
               <input type="color" value={s.highlight.color.slice(0, 7)} onChange={(e) => patch({ highlight: { color: e.target.value } }, false)} />
             </div>

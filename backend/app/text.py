@@ -54,7 +54,7 @@ STYLE_KEYS = ("content", "font", "size", "color", "outline", "shadow", "box", "l
 
 
 def needs_highlight(s: dict) -> bool:
-    return (s.get("highlight") or {}).get("style") in ("color", "pop")
+    return (s.get("highlight") or {}).get("style") in ("color", "pop", "revealpop")
 
 
 def layout_key(s: dict) -> str:
@@ -331,12 +331,11 @@ def state(spec: dict, nchars: int, nwords: int, tau: float, D: float) -> dict:
             if float(wt[i]["start"]) <= tau + 1e-9:
                 active = i
         for i, un in enumerate(units):
-            if hl["style"] == "reveal" and i < len(wt) and tau + 1e-9 < float(wt[i]["start"]):
+            if hl["style"] in ("reveal", "revealpop") and i < len(wt) and tau + 1e-9 < float(wt[i]["start"]):
                 un["a"] = 0.0
             if i == active:
-                if hl["style"] in ("color", "pop", "reveal"):
-                    un["hi"] = 1.0 if hl["style"] != "reveal" else 0.0
-                if hl["style"] == "pop":
+                un["hi"] = 1.0 if hl["style"] in ("color", "pop", "revealpop") else 0.0
+                if hl["style"] in ("pop", "revealpop"):
                     v = _clamp((tau - float(wt[i]["start"])) / 0.12)
                     un["s"] *= 1 + 0.08 * M.ease("punch", v)
     return {"block": blk, "kind": kind, "units": units}

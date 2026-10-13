@@ -15,7 +15,7 @@ Read this first at the start of every session.
 | 6 | Text (fonts, styles, on-canvas editing, animations, presets), auto-captions (faster-whisper GPU, karaoke), export presets + size estimate + cover, safe-area warnings (faces + text), photo extension | **Done** (2026-10-13) |
 | 7 | Style templates | Next |
 
-Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (60) and `cd frontend; npm test` (106).
+Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (61) and `cd frontend; npm test` (108).
 Git: commit to `master` and push after each tested phase or fix.
 
 ## Phase 1: what exists
@@ -96,6 +96,12 @@ Git: commit to `master` and push after each tested phase or fix.
 - **Photo extension** (`clip.extend`, photos): `backend/app/extend.py` builds one image per photo (edge-stretched, increasingly blurred with distance, 35 % margin each side, long side 1600) shared by both renderers; the extension is drawn under the whole photo with the same layer matrix (`layers.motion_layer` gained `extent` + `img_map`).
 - **Parity measured in the browser** (8 text variants x 2 times + 3 extension samples; 9x16 area blocks from the full-resolution canvas): on a flat background the text blocks are 2.4-4.2/255 against a 3.3 background offset (YUV round trip), rotated+boxed text 7.7 (4.1-4.6 on a 4x finer grid, box edges + chroma subsampling); placement best at zero shift; extension 3.2-4.4. Note: area averages must be computed exactly (a canvas halving chain overstated text errors 3-4x).
 
+## Phase 6.1 (2026-10-13): beat-synced captions, transition pass
+
+- Text panel: **♪ Sync words to the beat** (every half / one / two beats, from the music and audio tracks' detected beats; `text/edit.syncWordsToBeats`) and a **Reveal + pop** highlight (`revealpop`: words appear on their time, the newest is coloured and pops), in both renderers and the shared cases.
+- Export timing fix: overlay and text layers are timestamped in whole output frames (1/(1000 fps) units, 2 ms early) instead of rounded seconds. Before, a layer could start one frame late (6-decimal rounding, or the base video's timestamps after transition pieces sitting a hair early), and text frames were sampled from the clip's exact start instead of the first frame's time (half a frame early). Regression test `test_beat_words_appear_on_the_exact_frame` (with a whip transition).
+- Lyrics: whisper hears no vocals in the reel's 23.5 s of the song with normal settings (forced languages only hallucinate evenly spaced words), so the reel uses beat-synced story captions instead of lyrics.
+
 ## Decisions
 
 - Project length = end of the main video track (music running longer is cut). `util.projectDuration` and `render.build_plan` agree.
@@ -124,6 +130,7 @@ Git: commit to `master` and push after each tested phase or fix.
 - Phase 4b (2026-10-11): the B&W breakdown keeps only the orange glasses in colour (selective colour hue 19, range 12, softness 10, grey gate 0.28-0.40). Snapshot **"Beat Sync Reel v4b"** + `exports\Beat Sync Reel v4b.mp4`.
 - Phase 5 pass (2026-10-11): eased Ken Burns zoom or pan on all 24 shots (directions alternate; studio shots zoom anchored to the top edge so the faces move down, away from the Reels header; other zooms keep the face still), punch-ins on the drop landing 7.964 and the strongest kicks 8.963, 10.96, 16.951, 17.461, 19.458, a 0.35 s 9 px shake on the drop landing, synthesised whooshes on the 6 whip pans (peak on the cut) and a hit on the drop on two SFX tracks. Every frame validated: no edges, faces never pushed into the UI zones; all cuts on beats. No video clips in the reel, so no speed ramp. Snapshot **"Beat Sync Reel v5"** + `exports\Beat Sync Reel v5.mp4`; comparisons in `exports\v5 comparison\`.
 - Phase 6 pass (2026-10-13): v5 kept unchanged (`exports\Beat Sync Reel v5.mp4`). Studio shots (clips at 0, 1.95, 13.955, 14.466, 17.949) get photo extension and a downward shift of 140-160 px (the smallest that puts the face top below 236 px; face tops were 79-97 px) added to their existing y keyframes; motion, punches and cut timing unchanged (checked). Hook title "WAIT FOR / THE DROP" (Anton, warm cream, shadow) 0-1.95 s, pops in on beat 1 and punches on the beats at 0.46, 0.93, 1.46 s, below the face and clear of the UI zones; alternatives offered: "FROM STUDIO TO GOA", "GOA HITS DIFFERENT". Closing line "see you in Goa" (DM Serif Italic, glow) in the sky 20.97-end, fading with the music. Exports `Beat Sync Reel v6.mp4` (Reels max quality) and `Beat Sync Reel v6 Instagram.mp4` (Instagram preset, grain 35 %), cover `Beat Sync Reel v6 cover.jpg` (B&W orange-glasses frame at 7.3 s + hook). Snapshot project **"Beat Sync Reel v6"**; comparisons in `exports\v6 comparison\`.
+- Phase 6.1 pass (2026-10-13, done in the browser via Claude in Chrome): transitions all centred on beats and half a beat long (0.25 s; 0.2 s in the peak): whips at 1.95/3.97/9.96/11.96, whip up onto the drop 7.96, whip **down** onto the cross 12.96 (matches the tilt), white flash 5.97, new zoom-ins through the door 4.97 and into the peak 13.96, new whips on the peak bar starts 15.98/17.95, one-beat fade into the golden outro 19.97; fast whooshes on the four new ones. Beat-synced captions (Anton, warm cream, reveal + pop, one word per beat, 4 px dark outline): "suited up" 1.95, "then Goa called" 3.97, "3 2 1" countdown 6.46 (orange like the glasses), "old Goa" 7.96, "living in colour" 9.96 (cyan highlight), "street art" 11.96, "slow days" 12.96; top placement over the location shots, lower over the portraits; no safe-area warnings; 17/17 words appear on their beat frame in the export. Exports `Beat Sync Reel v6.1.mp4` + `Beat Sync Reel v6.1 Instagram.mp4`; snapshot **"Beat Sync Reel v6.1"**; comparisons in `exports6.1 comparison\`.
 - Ideas: P7 save this look as a style template.
 
 ## Known issues / notes

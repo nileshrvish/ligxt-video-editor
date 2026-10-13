@@ -33,6 +33,9 @@ from . import text as TX
 from .config import ROOT
 
 EXPORT_PRESETS = {p["id"]: p for p in json.loads((ROOT / "shared" / "export_presets.json").read_text(encoding="utf-8"))["presets"]}
+# Layers start on a whole output frame (timestamps in frames, never rounded seconds); the enable
+# window opens a hair (half a millisecond) early so 6-decimal rounding can't skip that frame.
+OFFSET_EPS = 0.0005
 GRAIN_REDUCTION = 0.35  # "reduce grain for upload": grain effects at 35 % of their amount
 from .grade import TO_GBRP, grade_chain, needs_grade, ref_scale
 from .transitions import ALL_TYPES, WHIP_TYPES, TransitionPlan, plan_transition
@@ -282,6 +285,11 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         segs_v.append(v)
         segs_a.append(a)
 
+    def layer_start(frame: int) -> str:
+        """Timestamps for a layer whose first frame belongs on output frame `frame`: in units of
+        1/(1000 fps), 2 ms early, so it is never held back a frame by the base video's rounding."""
+        return f"settb=1/{_f(fps * 1000)},setpts=PTS-STARTPTS+{frame * 1000 - int(fps * 2)}"
+
     def frame_at_fn(c: Clip, tau0: float):
         base = frame_of(c.start + tau0)
         return lambda tau: frame_of(c.start + tau) - base
@@ -436,7 +444,8 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                 if b_t - a_t <= EPS or nf <= 0:
                     continue
                 cd = c.model_dump()
-                tau0 = a_t - c.start
+                # clip time of the first output frame (frames sit on the absolute grid, like the preview)
+                tau0 = frame_of(a_t) / fps + r0 - c.start
                 prep = TX.prepare_clip(cd, tau0, nf, fps, W, H)
                 if prep is None:
                     continue
@@ -446,8 +455,8 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                 offset = frame_of(a_t) / fps
                 idx = g.add_input(["-framerate", _f(fps), "-start_number", "0", "-i", f"{prefix}_%05d.png"])
                 ov, out = g.label("tx"), g.label("vb")
-                g.add(f"[{idx}:v]format=rgba,setpts=PTS-STARTPTS+{_f(offset)}/TB[{ov}]")
-                g.add(f"[{v_base}][{ov}]overlay={prep['x']}:{prep['y']}:enable='between(t,{_f(offset)},{_f(offset + nf / fps)})':"
+                g.add(f"[{idx}:v]format=rgba,{layer_start(frame_of(a_t))}[{ov}]")
+                g.add(f"[{v_base}][{ov}]overlay={prep['x']}:{prep['y']}:enable='between(t,{_f(offset - OFFSET_EPS)},{_f(offset + nf / fps - OFFSET_EPS)})':"
                       f"eof_action=pass:format=auto[{out}]")
                 v_base = out
                 continue
@@ -517,9 +526,9 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
             else:
                 lay = LY.motion_layer(g, raw, cd, src_w, src_h, fill, W, H, tau0, fps, nf, workdir, rect=rect)
             ov = g.label("ov")
-            g.add(f"[{lay}]setpts=PTS-STARTPTS+{_f(offset)}/TB[{ov}]")
+            g.add(f"[{lay}]{layer_start(frame_of(a_t))}[{ov}]")
             out = g.label("vb")
-            g.add(f"[{v_base}][{ov}]overlay=0:0:enable='between(t,{_f(offset)},{_f(offset + seg)})':"
+            g.add(f"[{v_base}][{ov}]overlay=0:0:enable='between(t,{_f(offset - OFFSET_EPS)},{_f(offset + seg - OFFSET_EPS)})':"
                   f"eof_action=pass:format=auto[{out}]")
             v_base = out
             # Overlay video audio is mixed in like an audio-track clip.

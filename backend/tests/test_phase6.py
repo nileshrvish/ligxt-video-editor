@@ -213,3 +213,25 @@ def test_captions_speech_and_no_speech(client, media):
     p2 = proj(client, main, {"audio": [{"mediaId": mu["id"], "start": 0, "inPoint": 0, "outPoint": 3}]})
     job = wait_job(client, client.post(f"/api/projects/{p2['id']}/captions", json={"project": p2, "model": "small"}).json()["jobId"], timeout=600)
     assert job["status"] == "done" and job["result"]["words"] == [] and "No speech found" in job["result"]["message"]
+
+
+def test_beat_words_appear_on_the_exact_frame(client, media):
+    """A word timed at t shows from the first frame at or after t (like the preview), never a frame late."""
+    g = upload(client, media["grey"])
+    # start 0.95 s (frame 28.5: rounds to 28, the case where the first frame was skipped / content ran early)
+    words = [{"text": "ONE", "start": 0.0, "end": 0.5}, {"text": "TWO", "start": 0.511, "end": 1.0}]
+    tc = text_clip({"content": "ONE TWO", "font": "Anton-Regular", "size": 90, "color": "#ffffff", "words": words,
+                    "highlight": {"style": "revealpop", "color": "#ff0000"}}, start=0.95, dur=1.2)
+    # a whip transition on the main track (the concat of transition pieces is where a frame was lost)
+    main = [{"id": "a1", "mediaId": g["id"], "start": 0, "inPoint": 0, "outPoint": 0.7, "fit": "fill"},
+            {"id": "b1", "mediaId": g["id"], "start": 0.7, "inPoint": 0, "outPoint": 1.8, "fit": "fill"}]
+    p = proj(client, main, {"text": [tc]})
+    p["transitions"] = [{"id": "t1", "trackId": p["tracks"][0]["id"], "fromClipId": "a1", "toClipId": "b1", "type": "whipleft", "duration": 0.3}]
+    fr = frames(_export(client, p, mode="final")["path"])
+    red = lambda f: int(((f[..., 0] > 180) & (f[..., 1] < 90)).sum())  # noqa: E731
+    white = lambda f: int(((f.min(axis=-1) > 200)).sum())  # noqa: E731
+    first_on = next(k for k in range(len(fr)) if red(fr[k]) > 50)
+    assert first_on == 29, ("first word on the first frame at/after 0.95 s", first_on)  # 29/30 = 0.967
+    # "TWO" turns red (active) and "ONE" white on the first frame at/after 0.95 + 0.511 = 1.461 s -> frame 44 (1.4667)
+    switch = next(k for k in range(30, len(fr)) if white(fr[k]) > 100 and red(fr[k]) > 50)
+    assert switch == 44, switch

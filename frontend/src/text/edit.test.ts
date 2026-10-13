@@ -63,3 +63,16 @@ describe("text editing", () => {
     expect((t.clips[0].text as { words: { start: number }[] }).words.map((x) => x.start)).toEqual([0, 0.4]);
   });
 });
+
+describe("beat-synced words", () => {
+  it("puts one word on each beat from the clip start", () => {
+    const c = T.newTextClip(2, 2, { content: "three two one go" });
+    const beats = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0];
+    expect(T.syncWordsToBeats(c, beats, 1)).toBe(4);
+    const t = c.text as { words: { start: number; end: number }[]; highlight: { style: string } };
+    expect(t.words.map((w) => w.start)).toEqual([0, 0.5, 1, 1.5]);
+    expect(t.highlight.style).toBe("revealpop");
+    T.syncWordsToBeats(c, beats, 0.5);
+    expect((c.text as { words: { start: number }[] }).words.map((w) => w.start)).toEqual([0, 0.25, 0.5, 0.75]);
+  });
+});

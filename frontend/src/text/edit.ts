@@ -120,3 +120,26 @@ export function addCaptions(p: Project, words: TimedWord[], style: Partial<TextS
 /** Rest-state spec (normalised) for UI reads. */
 export const specOf = (c: Clip): TextSpec => normalize(c.text);
 export const textDuration = (c: Clip) => clipDuration(c);
+
+/** One word per beat (or every half / second beat) from the first beat at or after the clip's start:
+ *  words appear exactly on the music (used with the "reveal + pop" highlight). Returns the word count. */
+export function syncWordsToBeats(c: Clip, beats: number[], every: 0.5 | 1 | 2 = 1): number {
+  const spec = (c.text ?? {}) as Partial<TextSpec>;
+  const toks = tokens(String(spec.content ?? ""));
+  if (!toks.length || beats.length < 2) return 0;
+  const sorted = [...beats].sort((a, b) => a - b);
+  let grid: number[] = sorted;
+  if (every === 0.5) grid = sorted.flatMap((b, i) => (i + 1 < sorted.length ? [b, (b + sorted[i + 1]) / 2] : [b]));
+  if (every === 2) grid = sorted.filter((_, i) => i % 2 === 0);
+  const i0 = grid.findIndex((b) => b >= c.start - 0.02);
+  if (i0 < 0) return 0;
+  const end = c.start + clipDuration(c);
+  const words = toks.map((text, k) => {
+    const s = grid[i0 + k] ?? grid[grid.length - 1] + 0.5 * (i0 + k - grid.length + 1);
+    const e = grid[i0 + k + 1] ?? Math.max(s + 0.3, end);
+    return { text, start: +Math.max(0, s - c.start).toFixed(3), end: +Math.max(0, e - c.start).toFixed(3) };
+  });
+  const hl = spec.highlight?.style;
+  c.text = { ...spec, words, highlight: { color: spec.highlight?.color ?? "#ffd34d", style: hl && hl !== "none" ? hl : "revealpop" } } as Record<string, unknown>;
+  return words.length;
+}

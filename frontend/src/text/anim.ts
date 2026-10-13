@@ -13,7 +13,7 @@ export interface TextSpec {
   box: { enabled: boolean; color: string; opacity: number; padX: number; padY: number; radius: number; mode: string };
   letterSpacing: number; lineHeight: number; align: "left" | "center" | "right"; maxWidth: number; uppercase: boolean;
   animIn: TextAnim; animOut: TextAnim;
-  highlight: { style: "none" | "color" | "pop" | "reveal"; color: string };
+  highlight: { style: "none" | "color" | "pop" | "reveal" | "revealpop"; color: string };
   words: { text: string; start: number; end: number }[] | null;
 }
 export interface FontInfo { id: string; name: string; file: string; license: string }
@@ -99,10 +99,10 @@ export function state(spec: unknown, nchars: number, nwords: number, tau: number
     let active = -1;
     for (let i = 0; i < Math.min(nwords, wt.length); i++) if (wt[i].start <= tau + 1e-9) active = i;
     units.forEach((un, i) => {
-      if (hl.style === "reveal" && i < wt.length && tau + 1e-9 < wt[i].start) un.a = 0;
+      if ((hl.style === "reveal" || hl.style === "revealpop") && i < wt.length && tau + 1e-9 < wt[i].start) un.a = 0;
       if (i === active) {
-        un.hi = hl.style !== "reveal" ? 1 : 0;
-        if (hl.style === "pop") un.s *= 1 + 0.08 * ease("punch", clamp((tau - wt[i].start) / 0.12));
+        un.hi = hl.style === "color" || hl.style === "pop" || hl.style === "revealpop" ? 1 : 0;
+        if (hl.style === "pop" || hl.style === "revealpop") un.s *= 1 + 0.08 * ease("punch", clamp((tau - wt[i].start) / 0.12));
       }
     });
   }
@@ -173,6 +173,6 @@ export function lookOf(spec: unknown): string {
   const look: Obj = {};
   for (const k of STYLE_KEYS) look[k] = s[k];
   const hl = (s.highlight as TextSpec["highlight"]);
-  look.highlight = hl.style === "color" || hl.style === "pop" ? hl.color : null;
+  look.highlight = hl.style === "color" || hl.style === "pop" || hl.style === "revealpop" ? hl.color : null;
   return JSON.stringify(look);
 }

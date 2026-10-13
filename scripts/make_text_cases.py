@@ -35,6 +35,8 @@ cases = [
                              "animOut": {"type": "words", "duration": 0.6, "easing": "in"}}), [0.1, 0.45, 1.0, 1.6]),
     ("caption pop", clip(T._merge(P["caption"]["style"], {"content": " ".join(words), "words": timed}), D=1.6, tr={"y": 380}), [0, 0.3, 0.55, 1.3]),
     ("caption reveal", clip({"content": " ".join(words), "words": timed, "highlight": {"style": "reveal", "color": "#ffd34d"}}, D=1.6), [0.1, 0.6, 1.4]),
+    ("beat words reveal + pop", clip({"content": "three two one go", "size": 110, "words": [{"text": w, "start": 0.5 * i, "end": 0.5 * i + 0.5} for i, w in enumerate("three two one go".split())],
+                                      "highlight": {"style": "revealpop", "color": "#ffd34d"}}, D=2.2), [0.0, 0.55, 1.05, 1.6, 2.1]),
     ("caption colour", clip({"content": " ".join(words), "words": timed, "highlight": {"style": "color", "color": "#ff0000"}}, D=1.6), [0.6]),
     ("slide left + keyframes", clip({"content": "Keyframed", "font": "BebasNeue-Regular", "size": 120, "letterSpacing": 6,
                                      "animIn": {"type": "slide", "duration": 0.5, "easing": "inout", "direction": "left", "distance": 120}},
