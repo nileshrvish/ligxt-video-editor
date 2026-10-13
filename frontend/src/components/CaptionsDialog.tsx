@@ -84,7 +84,7 @@ export default function CaptionsDialog({ onClose }: { onClose: () => void }) {
         </div>
         {running && (<><ProgressBar value={job!.progress} /><div className="faint" style={{ fontSize: 12 }}>{job!.message || "Working"}</div></>)}
         {result && <div className="tr-warning">{result}</div>}
-        <div className="faint" style={{ fontSize: 11 }}>The first run downloads the speech model (about 460 MB for "small") into models\\whisper.</div>
+        <div className="faint" style={{ fontSize: 11 }}>The first run downloads the speech model (about 460 MB for "small") into the models/whisper folder.</div>
       </div>
     </Modal>
   );

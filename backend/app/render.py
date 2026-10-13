@@ -194,16 +194,22 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         raise RenderError("The main video track is empty. Add at least one clip to it before exporting.")
 
     metas: dict[str, dict] = {}
+    gone: list[str] = []
     for t in project.tracks:
         for c in t.clips:
             if c.mediaId and c.mediaId not in metas:
                 m = load_meta(c.mediaId)
                 if not m:
-                    raise RenderError(f"A clip on '{t.name or t.type}' uses media that no longer exists. "
-                                      f"Remove that clip or re-import the file.")
+                    gone.append(f"a file used on '{t.name or t.type}' at {c.start:.1f} s (its media folder was deleted)")
+                    metas[c.mediaId] = {}
+                    continue
                 if not original_path(m).exists():
-                    raise RenderError(f"The original file for '{m['name']}' is missing from the media folder.")
+                    gone.append(f"'{m['name']}'")
                 metas[c.mediaId] = m
+    if gone:
+        raise RenderError(f"{len(gone)} media file(s) are missing (moved or deleted): {', '.join(gone[:6])}"
+                          f"{' and more' if len(gone) > 6 else ''}. In the Media panel, click 'Relink' on each missing file "
+                          f"and choose where it is now, then export again.")
 
     from .luts import load_cube
     cubes: dict[str, dict] = {}
@@ -701,10 +707,27 @@ def run_tasks(plan: Plan, rdir: Path, ctx: JobContext | None = None) -> None:
         fn(rdir)
 
 
+def export_size_bound(project: Project, mode: str, duration: float) -> int:
+    """A generous upper bound for the export's size (for the disk space check)."""
+    preset = EXPORT_PRESETS.get(project.export.preset) or EXPORT_PRESETS["custom"]
+    v = video_quality(project.export, preset)
+    w, h = int(project.export.width or project.settings.width), int(project.export.height or project.settings.height)
+    px = max(1.0, w * h / (1080 * 1920))
+    if mode == "draft":
+        kbps = 15000 * px
+    elif v.get("kind") == "bitrate":
+        kbps = float(v.get("maxKbps") or v.get("kbps", 12000))
+    else:
+        kbps = 60000 * px  # CRF 18 with heavy film grain reached ~48 Mbps at 1080x1920
+    return int((kbps + 320) * 1000 / 8 * duration * 1.2)
+
+
 def run_export(project: Project, mode: str, range_start: float | None, range_end: float | None):
+    from .system_api import record_export, require_space
     out = _export_name(project, mode)
     workdir = CACHE_DIR / "_render" / uuid.uuid4().hex[:12]
     plan = build_plan(project, out, mode=mode, range_start=range_start, range_end=range_end, workdir=workdir)
+    require_space(config.EXPORTS_DIR, export_size_bound(project, mode, plan.duration), "this export")
 
     def job(ctx: JobContext) -> dict:
         rdir = workdir
@@ -727,6 +750,10 @@ def run_export(project: Project, mode: str, range_start: float | None, range_end
             shutil.rmtree(rdir, ignore_errors=True)
         ctx.progress(0.99, "Checking audio sync")
         sync = sync_check(plan.output, plan.duration, plan.fps)
+        try:
+            record_export(plan.output, project, mode, range_start, range_end)
+        except OSError:
+            pass
         ctx.message("Done" if sync["ok"] else "Done (sync warning)")
         return {"path": str(plan.output), "file": plan.output.name, "size": plan.output.stat().st_size,
                 "duration": round(plan.duration, 3), "sync": sync,

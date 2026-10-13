@@ -7,6 +7,9 @@ import { projectDuration } from "../util";
 import { Modal } from "./Common";
 import ExportDialog, { openFolderAfterExport } from "./ExportDialog";
 import SaveTemplateDialog from "./SaveTemplateDialog";
+import ProjectGuard from "./ProjectGuard";
+import Tour, { replayTour } from "./Tour";
+import JobsPill from "./JobsPill";
 import { api } from "../api";
 import { Icon, Logo } from "./Icons";
 import MediaLibrary from "./MediaLibrary";
@@ -171,6 +174,8 @@ export default function Editor({ projectId }: { projectId: string }) {
   return (
     <div className="editor">
       <TopBar onExport={() => setShowExport(true)} onHelp={() => setShowHelp(true)} />
+      <ProjectGuard projectId={projectId} />
+      <Tour />
       <div className="workspace">
         <PanelGroup direction="vertical" autoSaveId="ligxt-v2">
           <Panel defaultSize={60} minSize={30}>
@@ -207,8 +212,6 @@ function TopBar({ onExport, onHelp }: { onExport: () => void; onHelp: () => void
   const lastSaved = useEditor((s) => s.lastSaved);
   const canUndo = useEditor((s) => s.past.length > 0);
   const canRedo = useEditor((s) => s.future.length > 0);
-  const jobs = useApp((s) => s.jobs);
-  const running = Object.values(jobs).filter((j) => (j.status === "running" || j.status === "queued") && j.kind !== "export");
   const [draft, setDraft] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => setDraft(name), [name]);
@@ -258,11 +261,7 @@ function TopBar({ onExport, onHelp }: { onExport: () => void; onHelp: () => void
         {stateLabel}
       </span>
       <div className="spacer" />
-      {running.length > 0 && (
-        <span className="jobs-pill" title={running.map((j) => `${j.label}: ${Math.round(j.progress * 100)}%`).join("\n")}>
-          <Icon name="loader" size={13} className="spin" /> Processing {running.length} file{running.length > 1 ? "s" : ""}
-        </span>
-      )}
+      <JobsPill />
       <button className="btn ghost icon" disabled={!canUndo} onClick={() => useEditor.getState().undo()} title="Undo (Ctrl+Z)">
         <Icon name="undo" />
       </button>
@@ -283,7 +282,7 @@ function TopBar({ onExport, onHelp }: { onExport: () => void; onHelp: () => void
         <Icon name="sparkles" /> Save as template
       </button>
       {saveTpl && <SaveTemplateDialog onClose={() => setSaveTpl(false)} />}
-      <button className="btn primary" onClick={onExport} title="Export (Ctrl+E)">
+      <button className="btn primary" data-tour="export" onClick={onExport} title="Export (Ctrl+E)">
         <Icon name="export" /> Export
       </button>
     </div>
@@ -318,7 +317,7 @@ const SHORTCUTS: [string, string, boolean?][] = [
 
 export function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
   return (
-    <Modal title="Keyboard shortcuts" onClose={onClose} wide>
+    <Modal title="Keyboard shortcuts" onClose={onClose} wide footer={<><span className="faint" style={{ marginRight: "auto", fontSize: 12 }}>Ligxt v{__APP_VERSION__}</span><button className="btn" onClick={replayTour}>Show the tour again</button><button className="btn primary" onClick={onClose}>Close</button></>}>
       <div className="shortcut-list">
         {SHORTCUTS.map(([k, d, soon]) => (
           <div key={k} className={soon ? "soon" : ""}>

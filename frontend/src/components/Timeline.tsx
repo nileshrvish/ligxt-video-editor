@@ -201,7 +201,7 @@ export default function Timeline() {
   const [captionsOpen, setCaptionsOpen] = useState(false);
 
   return (
-    <div className="timeline">
+    <div className="timeline" data-tour="timeline">
       <div className="tl-toolbar">
         <button className="btn ghost sm" onClick={() => st().splitAtPlayhead()} title="Split at playhead (S)">
           <Icon name="scissors" size={14} /> Split
@@ -539,9 +539,10 @@ function Ruler({
   const major = steps.find((s) => s * pps >= 80) ?? 600;
   const minor = major / 5;
   const ticks = [];
-  for (let t = 0; t * pps <= width; t += minor) {
-    const isMajor = Math.abs(t / major - Math.round(t / major)) < 1e-6;
-    ticks.push(<div key={t.toFixed(3)} className={`tick ${isMajor ? "major" : "minor"}`} style={{ left: t * pps }} />);
+  // minor ticks are a CSS background (thousands of elements made zooming slow); majors + labels are elements
+  for (let t = 0; t * pps <= width; t += major) {
+    const isMajor = true;
+    ticks.push(<div key={t.toFixed(3)} className="tick major" style={{ left: t * pps }} />);
     if (isMajor) {
       const m = Math.floor(t / 60);
       const s = t - m * 60;
@@ -553,7 +554,8 @@ function Ruler({
     }
   }
   return (
-    <div className="tl-ruler" style={{ width }} onPointerDown={onPointerDown}>
+    <div className="tl-ruler" style={{ width, backgroundImage: `repeating-linear-gradient(to right, var(--line-strong) 0 1px, transparent 1px ${minor * pps}px)`,
+      backgroundSize: "100% 5px", backgroundPosition: "0 100%", backgroundRepeat: "no-repeat" }} onPointerDown={onPointerDown}>
       {ticks}
       {markers.map((m) => (
         <div
@@ -673,12 +675,13 @@ function Waveform({ m, c, width, muted }: { m: MediaMeta; c: Clip; width: number
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let cancelled = false;
-    loadWave(m.waveform!)
+    // zooming changes `width` every frame: draw once the zoom settles
+    const h = setTimeout(() => loadWave(m.waveform!)
       .then((wf) => {
         const cv = ref.current;
         if (cancelled || !cv) return;
         const dpr = window.devicePixelRatio || 1;
-        const W = Math.min(16000, Math.round(width * dpr));
+        const W = Math.min(4096, Math.round(width * dpr)); // stretched by CSS beyond that
         const H = Math.round((cv.clientHeight || 20) * dpr);
         cv.width = W;
         cv.height = H;
@@ -698,10 +701,11 @@ function Waveform({ m, c, width, muted }: { m: MediaMeta; c: Clip; width: number
           ctx.fillRect(x, H - h, 1, h);
         }
       })
-      .catch(() => void 0);
+      .catch(() => void 0), 120);
     return () => {
       cancelled = true;
+      clearTimeout(h);
     };
   }, [m.waveform, c.inPoint, c.outPoint, c.volume, width, muted]);
-  return <canvas ref={ref} />;
+  return <canvas ref={ref} style={{ width: "100%" }} />;
 }

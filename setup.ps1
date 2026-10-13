@@ -59,4 +59,8 @@ ffmpeg -hide_banner -loglevel error -f lavfi -i color=s=256x256:d=0.2 -c:v h264_
 if ($LASTEXITCODE -eq 0) { Write-Host "NVENC available: drafts and proxies will use the GPU." -ForegroundColor Green }
 else { Write-Host "NVENC not available: falling back to CPU (libx264). Everything still works, just slower." -ForegroundColor Yellow }
 
-Write-Host "`nSetup complete. Start the editor with:  .\start.ps1" -ForegroundColor Green
+Step "Desktop shortcut"
+& (Join-Path $Root "install_shortcut.ps1")
+
+Write-Host "`nSetup complete. Start the editor from the 'Ligxt Video Editor' desktop shortcut (tray icon: Open / Stop)," -ForegroundColor Green
+Write-Host "or from a terminal with  .\start.ps1  (PowerShell) /  ./start.sh  (Git Bash)." -ForegroundColor Green

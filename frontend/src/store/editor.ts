@@ -1,9 +1,12 @@
 import { create } from "zustand";
+import { produce, setAutoFreeze } from "immer";
+
+setAutoFreeze(false); // project objects are never mutated outside commit(), freezing only costs time
 import { api, uploadMedia } from "../api";
 import type { Clip, Filter, MediaMeta, Project, TrackType } from "../types";
 import * as ops from "../timeline/ops";
 import { cuts as cutPairs } from "../timeline/transitions";
-import { clipEnd, newClip, projectDuration as projectDurationOf, trackEnd, uid } from "../util";
+import { clipEnd, deepClone, newClip, projectDuration as projectDurationOf, trackEnd, uid } from "../util";
 import { toastError, useApp } from "./app";
 import * as E from "../motion/edit";
 import { srcTime } from "../motion/motion";
@@ -107,9 +110,23 @@ interface EditorState {
   fromBase: (fn: (draft: Project) => void) => void;
   mediaDuration: ops.MediaDuration;
   save: (kind?: "manual" | "auto") => Promise<boolean>;
+  /** Another tab holds this project's lock: no saving here. */
+  readOnly: boolean;
+  setReadOnly: (v: boolean) => void;
 }
 
 const HISTORY_LIMIT = 100;
+
+let roWarned = 0;
+/** Edits are refused while another tab owns the project; say so (at most every few seconds). */
+function readOnlyBlocked(ro: boolean): boolean {
+  if (!ro) return false;
+  if (Date.now() - roWarned > 4000) {
+    roWarned = Date.now();
+    useApp.getState().toast({ kind: "warning", title: "Read-only", detail: "This project is being edited in another tab. Click 'Edit here' to edit it in this tab." });
+  }
+  return true;
+}
 
 export const useEditor = create<EditorState>((set, get) => ({
   project: null,
@@ -211,7 +228,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       const t = d.tracks.find((x) => x.id === hit.track.id)!;
       const base = t.clips.find((c) => c.id === selection.clipId)!;
       const freeze: Clip = {
-        ...structuredClone(base), id: uid(), start: playhead, inPoint: Math.max(0, src - seconds), outPoint: Math.max(seconds, src),
+        ...deepClone(base), id: uid(), start: playhead, inPoint: Math.max(0, src - seconds), outPoint: Math.max(seconds, src),
         speed: 1, speedRamp: null, reverse: false, freezeFrame: src, keyframes: {}, muted: true,
       };
       const idx = t.clips.findIndex((c) => c.id === rightId);
@@ -245,13 +262,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     });
   },
 
-  close: () => set({ project: null, media: {}, past: [], future: [], selection: { kind: "none" }, playing: false }),
+  close: () => set({ project: null, media: {}, past: [], future: [], selection: { kind: "none" }, playing: false, readOnly: false }),
 
   commit: (fn, undoable = true) => {
     const cur = get().project;
-    if (!cur) return;
-    const next = structuredClone(cur);
-    fn(next);
+    if (!cur || readOnlyBlocked(get().readOnly)) return;
+    // Structural sharing: unchanged tracks and clips keep their identity, so only what changed re-renders.
+    const next = produce(cur, (d) => { fn(d as Project); });
     set({
       project: next,
       saveState: "dirty",
@@ -271,14 +288,14 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   undo: () => {
     const { past, project, future } = get();
-    if (!past.length || !project) return;
+    if (!past.length || !project || readOnlyBlocked(get().readOnly)) return;
     set({ project: past[past.length - 1], past: past.slice(0, -1), future: [project, ...future], saveState: "dirty" });
     get().select(validSelection(get()));
   },
 
   redo: () => {
     const { past, project, future } = get();
-    if (!future.length || !project) return;
+    if (!future.length || !project || readOnlyBlocked(get().readOnly)) return;
     set({ project: future[0], future: future.slice(1), past: [...past, project], saveState: "dirty" });
     get().select(validSelection(get()));
   },
@@ -438,7 +455,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     get().commit((d) => {
       for (const id of clipIds) {
         const hit = ops.findClip(d, id);
-        if (hit && !hit.track.locked) hit.clip.filters = structuredClone(fl).map((f) => ({ ...f, id: uid() }));
+        if (hit && !hit.track.locked) hit.clip.filters = deepClone(fl).map((f) => ({ ...f, id: uid() }));
       }
     });
   },
@@ -492,10 +509,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   fromBase: (fn) => {
+    if (readOnlyBlocked(get().readOnly)) return;
     const base = get().gestureStart ?? get().project;
     if (!base) return;
-    const next = structuredClone(base);
-    fn(next);
+    const next = produce(base, (d) => { fn(d as Project); });
     set({ project: next, saveState: "dirty" });
   },
 
@@ -504,9 +521,15 @@ export const useEditor = create<EditorState>((set, get) => ({
     return !m || m.type === "image" ? Infinity : m.duration;
   },
 
+  readOnly: false,
+  setReadOnly: (readOnly) => set({ readOnly }),
   save: async (kind = "manual") => {
     const p = get().project;
     if (!p) return false;
+    if (get().readOnly) {
+      if (kind === "manual") useApp.getState().toast({ kind: "warning", title: "Read-only", detail: "This project is open in another tab. Click 'Edit here' to save from this tab." });
+      return false;
+    }
     set({ saveState: "saving" });
     try {
       const r = kind === "auto" ? await api.autosave(p) : await api.saveProject(p);

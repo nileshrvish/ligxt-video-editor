@@ -1,7 +1,7 @@
 // Text clip editing: new clips, presets, content changes (keeping caption word timings), captions.
 import type { Clip, Project } from "../types";
 import { addTrack } from "../timeline/ops";
-import { clipDuration, uid } from "../util";
+import { clipDuration, deepClone, uid } from "../util";
 import { mergeSpec, normalize, TEXT_PRESETS, type TextPreset, type TextSpec } from "./anim";
 
 
@@ -20,7 +20,7 @@ export const presetById = (id: string): TextPreset | undefined => TEXT_PRESETS.f
 export function applyStyle(c: Clip, style: Partial<TextSpec>, position?: { x: number; y: number }): void {
   const cur = (c.text ?? {}) as Partial<TextSpec>;
   const keep = { content: cur.content ?? "Your text", words: cur.words ?? null };
-  c.text = { ...mergeSpec(structuredClone(style) as Partial<TextSpec>, {}), ...keep } as Record<string, unknown>;
+  c.text = { ...mergeSpec(deepClone(style) as Partial<TextSpec>, {}), ...keep } as Record<string, unknown>;
   if (position) {
     c.transform.x = position.x;
     c.transform.y = position.y;
@@ -106,7 +106,7 @@ export function addCaptions(p: Project, words: TimedWord[], style: Partial<TextS
     const next = segs[i + 1]?.[0].start ?? Infinity;
     const end = Math.max(start + 0.3, Math.min(seg[seg.length - 1].end + 0.25, next));
     const spec: Partial<TextSpec> = {
-      ...structuredClone(style), content: seg.map((w) => w.text).join(" "),
+      ...deepClone(style), content: seg.map((w) => w.text).join(" "),
       words: seg.map((w) => ({ text: w.text, start: +(w.start - start).toFixed(3), end: +(w.end - start).toFixed(3) })),
       animIn: { type: "none", duration: 0.2, easing: "out" }, animOut: { type: "none", duration: 0.2, easing: "in" },
     };

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useApp } from "../store/app";
+import { toastError, useApp } from "../store/app";
 import { useEditor } from "../store/editor";
 import type { MediaMeta } from "../types";
 import { fmtDuration } from "../util";
@@ -17,6 +17,8 @@ export default function MediaLibrary() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const items = ids.map((id) => media[id]).filter((m): m is MediaMeta => !!m && (filter === "all" || m.type === filter));
+  // media whose folder was deleted: clips still point at it
+  const gone = filter === "all" ? ids.filter((id) => !media[id]) : [];
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -26,7 +28,7 @@ export default function MediaLibrary() {
   };
 
   return (
-    <div className="panel">
+    <div className="panel" data-tour="media">
       <div className="panel-head">
         Media
         <span className="faint" style={{ textTransform: "none", fontWeight: 400 }}>{ids.length}</span>
@@ -93,6 +95,7 @@ export default function MediaLibrary() {
             </div>
           ) : (
             <div className="media-grid">
+              {gone.map((id) => <MissingItem key={id} id={id} />)}
               {items.map((m) => (
                 <MediaItem key={m.id} m={m} />
               ))}
@@ -154,6 +157,10 @@ function MediaItem({ m }: { m: MediaMeta }) {
               {job.status === "running" && `${Math.round(job.progress * 100)}%`}
             </div>
           </div>
+        ) : m.fileMissing ? (
+          <div className="status-line error-text" title="The original file was moved or deleted outside Ligxt">
+            <Icon name="alert" size={12} /> File missing <RelinkButton id={m.id} accept={m.type === "image" ? "image/*" : m.type === "audio" ? "audio/*" : "video/*"} />
+          </div>
         ) : m.status === "error" ? (
           <div className="status-line error-text" title={m.error ?? ""}>
             <Icon name="alert" size={12} /> Processing failed
@@ -163,6 +170,46 @@ function MediaItem({ m }: { m: MediaMeta }) {
             <Icon name="alert" size={12} /> Ready with warnings
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Choose where a moved/deleted file is now: same media id, so every clip that uses it works again. */
+function RelinkButton({ id, accept }: { id: string; accept?: string }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <>
+      <button className="btn xs" disabled={busy} onClick={(e) => { e.stopPropagation(); ref.current?.click(); }}>{busy ? "Relinking…" : "Relink…"}</button>
+      <input ref={ref} type="file" accept={accept} hidden onChange={async (e) => {
+        const f = e.target.files?.[0];
+        e.target.value = "";
+        if (!f) return;
+        setBusy(true);
+        try {
+          const r = await fetch(`/api/media/${id}/relink?filename=${encodeURIComponent(f.name)}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `Relink failed (${r.status})`);
+          await useEditor.getState().refreshMedia(id);
+          useApp.getState().toast({ kind: "success", title: `Relinked to ${f.name}`, detail: "Every clip that used the missing file works again." });
+        } catch (er) {
+          toastError("Relink failed", er);
+        } finally {
+          setBusy(false);
+        }
+      }} />
+    </>
+  );
+}
+
+function MissingItem({ id }: { id: string }) {
+  return (
+    <div className="media-item missing" title="This media's folder was deleted. Relink it to a file to bring its clips back.">
+      <div className="mthumb"><Icon name="alert" size={22} /></div>
+      <div className="minfo">
+        <b>Missing media</b>
+        <span className="error-text">Deleted from the media folder</span>
+        <div className="status-line"><RelinkButton id={id} /></div>
       </div>
     </div>
   );

@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import captions, config, luts, media, presets_api, projects, render, templates_api, text_api
+from . import captions, config, luts, media, presets_api, projects, render, system_api, templates_api, text_api
 from .ffmpeg_utils import ffmpeg_version, has_nvenc
 from .jobs import jobs
 
@@ -26,12 +26,14 @@ log = logging.getLogger("ligxt")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    system_api.mark_started()
     threading.Thread(target=has_nvenc, daemon=True).start()  # warm the encoder check
     if config.OPEN_BROWSER:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{config.PORT}")).start()
     print(f"Ligxt Video Editor running at http://127.0.0.1:{config.PORT}", flush=True)
     yield
     jobs.shutdown()
+    system_api.mark_stopped()
 
 
 app = FastAPI(title="Ligxt Video Editor", lifespan=lifespan)
@@ -43,6 +45,7 @@ app.include_router(presets_api.router)
 app.include_router(text_api.router)
 app.include_router(captions.router)
 app.include_router(templates_api.router)
+app.include_router(system_api.router)
 
 
 @app.exception_handler(Exception)
@@ -54,7 +57,7 @@ async def unhandled(request: Request, exc: Exception):
 # ---------------------------------------------------------------- system
 @app.get("/api/health")
 def health():
-    return {"ok": True, "app": "Ligxt Video Editor"}
+    return {"ok": True, "app": "Ligxt Video Editor", "version": system_api.VERSION}
 
 
 @app.get("/api/system")

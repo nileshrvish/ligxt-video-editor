@@ -31,7 +31,7 @@ export default function Preview() {
   const media = useEditor((s) => s.media);
   const source = selection.kind === "media" ? media[selection.id] : null;
   return (
-    <div className="panel">
+    <div className="panel" data-tour="preview">
       <div className="panel-head">
         {source ? "Source" : "Program"}
         {source && <span className="faint" style={{ textTransform: "none", fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{source.name}</span>}

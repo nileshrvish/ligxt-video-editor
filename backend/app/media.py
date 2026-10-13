@@ -228,6 +228,13 @@ def process_media(mid: str):
 
         ctx.progress(0.15, "Proxy")
         meta = update_meta(mid, proxyStatus="pending")
+        if meta["type"] == "video":
+            from .system_api import free_bytes, fmt_bytes
+            need = int(float(meta.get("size") or 0) * 0.6) + 300 * 1024 * 1024
+            if free_bytes(CACHE_DIR) < need:
+                update_meta(mid, proxyStatus="error", status="error",
+                            error=f"Not enough disk space for the preview proxy (needs about {fmt_bytes(need)}). Free some space and click Rebuild proxy.")
+                raise RuntimeError("Not enough disk space for the preview proxy.")
         try:
             url, status = make_proxy(meta, ctx, 0.15, 1.0)
             meta = update_meta(mid, proxy=url, proxyStatus=status)
@@ -306,8 +313,56 @@ def list_media(ids: str = ""):
     out, missing = [], []
     for mid in [i for i in ids.split(",") if i]:
         meta = load_meta(_valid_id(mid))
-        (out.append(meta) if meta else missing.append(mid))
+        if meta:
+            meta["fileMissing"] = not original_path(meta).exists()  # moved or deleted outside Ligxt
+            out.append(meta)
+        else:
+            missing.append(mid)
     return {"media": out, "missing": missing}
+
+
+@router.post("/{mid}/relink")
+async def relink(mid: str, request: Request, filename: str = Query(..., min_length=1)):
+    """Point a media item whose file was moved or deleted at a new file: same id, so every clip that
+    uses it works again. Also recreates a media item whose folder was deleted."""
+    mid = _valid_id(mid)
+    name = _safe_name(filename)
+    ext = Path(name).suffix.lower()
+    if ext not in VIDEO_EXT | IMAGE_EXT | AUDIO_EXT:
+        raise HTTPException(415, f"Unsupported file type '{ext or name}'.")
+    old = load_meta(mid)
+    d = media_dir(mid)
+    d.mkdir(parents=True, exist_ok=True)
+    for f in d.glob("original.*"):
+        f.unlink(missing_ok=True)
+    dest = d / f"original{ext}"
+    size = 0
+    with dest.open("wb") as f:
+        async for chunk in request.stream():
+            f.write(chunk)
+            size += len(chunk)
+    if size == 0:
+        raise HTTPException(400, f"'{name}' is empty.")
+    try:
+        info = probe(str(dest))
+    except FFmpegError as e:
+        raise HTTPException(422, f"'{name}' could not be read: {e}") from e
+    mtype = media_type_for(ext, info)
+    if old and old.get("type") and old["type"] != mtype:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, f"That is a {mtype} file, but the missing file was a {old['type']}. Pick the right file.")
+    if mtype == "image":
+        info["duration"] = 0
+    shutil.rmtree(cache_dir(mid), ignore_errors=True)
+    meta = {**(old or {}), "id": mid, "name": name, "type": mtype, "file": f"media/{mid}/original{ext}", "size": size,
+            "imported": (old or {}).get("imported", time.time()), **info, "thumbnail": None, "waveform": None, "proxy": None,
+            "proxyStatus": "none", "status": "processing", "error": None, "faces": None}
+    meta.pop("fileMissing", None)
+    save_meta(meta)
+    job = queue_processing(meta)
+    if old and old.get("beats") and mtype != "image":
+        pass  # beats are kept: re-run Detect beats if the song changed
+    return {"media": meta, "jobId": job.id}
 
 
 @router.get("/{mid}")
@@ -315,6 +370,7 @@ def get_media(mid: str):
     meta = load_meta(_valid_id(mid))
     if not meta:
         raise HTTPException(404, "Media not found.")
+    meta["fileMissing"] = not original_path(meta).exists()
     return meta
 
 
@@ -392,6 +448,18 @@ def detect_faces(mid: str):
 
     job = jobs.submit("faces", f"Faces: {meta['name']}", run, queue="media", ref={"mediaId": mid})
     return {"jobId": job.id}
+
+
+@router.get("/{mid}/energy")
+def media_energy(mid: str):
+    """Energy curve (10 points/s) and the likely drop of a song (for lining up a template's drop)."""
+    meta = load_meta(_valid_id(mid))
+    if not meta:
+        raise HTTPException(404, "Media not found.")
+    if not meta.get("hasAudio"):
+        raise HTTPException(400, f"'{meta['name']}' has no audio.")
+    from .analysis import energy
+    return energy(meta)
 
 
 @router.get("/{mid}/extended")

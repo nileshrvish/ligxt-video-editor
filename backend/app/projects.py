@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .fsutil import replace_retry
+from .system_api import check_lock
 
 import json
 import re
@@ -9,7 +10,7 @@ import shutil
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, ValidationError
 
 from .config import AUTOSAVE_KEEP, PROJECTS_DIR
@@ -110,8 +111,9 @@ def get_project(pid: str):
 
 
 @router.put("/{pid}")
-def put_project(pid: str, body: dict):
+def put_project(pid: str, body: dict, x_ligxt_client: str | None = Header(default=None)):
     _pid(pid)
+    check_lock(pid, x_ligxt_client)
     try:
         project = Project.model_validate(body)
     except ValidationError as e:
@@ -123,9 +125,10 @@ def put_project(pid: str, body: dict):
 
 
 @router.post("/{pid}/autosave")
-def autosave(pid: str, body: dict):
+def autosave(pid: str, body: dict, x_ligxt_client: str | None = Header(default=None)):
     """Write a timestamped autosave, prune to the newest AUTOSAVE_KEEP, and update project.json."""
     _pid(pid)
+    check_lock(pid, x_ligxt_client)
     try:
         project = Project.model_validate(body)
     except ValidationError as e:

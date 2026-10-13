@@ -4,6 +4,7 @@
 import stylesJson from "../../../shared/text_styles.json";
 import type { Clip } from "../types";
 import { clipDuration, ease, transformAt, type Mat, type TransformValues } from "../motion/motion";
+import { deepClone } from "../util";
 
 export interface TextAnim { type: string; duration: number; easing: string; direction?: string; distance?: number }
 export interface TextSpec {
@@ -33,10 +34,10 @@ export interface TextLayout {
 
 type Obj = Record<string, unknown>;
 function merge<T>(base: T, over: unknown): T {
-  const out = structuredClone(base) as Obj;
+  const out = deepClone(base) as Obj;
   for (const [k, v] of Object.entries((over ?? {}) as Obj)) {
     if (v && typeof v === "object" && !Array.isArray(v) && out[k] && typeof out[k] === "object" && !Array.isArray(out[k])) out[k] = merge(out[k], v);
-    else out[k] = structuredClone(v);
+    else out[k] = deepClone(v);
   }
   return out as T;
 }

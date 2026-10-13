@@ -256,7 +256,8 @@ def from_project(project: Project, name: str, *, category: str = "Beat sync", ta
                       "fit": cd.get("fit"), "filters": looks, "extend": bool(cd.get("extend")), "motion": motion,
                       "transform": tr0,
                       "keyframes": kfb,
-                      "speed": cd.get("speed", 1), "transitionOut": None})
+                      "speed": cd.get("speed", 1), "transitionOut": None,
+                      "audio": {"muted": bool(cd.get("muted")), "volume": cd.get("volume", 1)} if m.get("type") == "video" else None})
         id2slot[c.id] = len(slots) - 1
     if dropped:
         notes.append(f"Per-photo colour corrections (shots {', '.join(map(str, dropped))}) are not stored: "
@@ -378,6 +379,44 @@ def color_match(stats: dict[str, dict], strength: float = 0.6) -> dict[str, dict
 
 
 # ---------------------------------------------------------------- generation
+def assign_media(t: dict, media_ids: list[str], slot_media: list[str] | None = None, report: list[str] | None = None) -> list[str]:
+    """Media id per slot: `media_ids` fill the distinct shots (refs) in order; fewer are reused
+    (never the same file twice in a row), extra ones replace repeated shots."""
+    report = report if report is not None else []
+    refs = int(t.get("refs") or len(t["slots"]))
+    if slot_media:
+        if len(slot_media) != len(t["slots"]):
+            raise ValueError("slot_media needs one media id per slot.")
+        return list(slot_media)
+    if not media_ids:
+        raise ValueError("Add at least one photo or video.")
+    ref_media = [media_ids[i % len(media_ids)] for i in range(refs)]
+    assign = [ref_media[s["ref"]] for s in t["slots"]]
+    if len(media_ids) < refs:
+        report.append(f"The template has {refs} different shots and you gave {len(media_ids)} files: "
+                      f"files are reused in order (shot {len(media_ids) + 1} shows file 1 again, and so on).")
+    extra = media_ids[refs:]
+    if extra:
+        seen, k = set(), 0
+        for i, s in enumerate(t["slots"]):
+            if s["ref"] in seen and k < len(extra):
+                assign[i] = extra[k]
+                k += 1
+            seen.add(s["ref"])
+        if k:
+            report.append(f"You gave {len(media_ids)} files for {refs} shots: {k} extra file(s) replace repeated shots "
+                          f"(slots that showed an earlier photo again).")
+        if k < len(extra):
+            report.append(f"{len(extra) - k} file(s) were not used (no free slots); drag them onto the timeline if you want them.")
+    if len(set(media_ids)) > 1:  # never the same file twice in a row when files are reused
+        for i in range(1, len(assign)):
+            if assign[i] == assign[i - 1]:
+                nxt = assign[i + 1] if i + 1 < len(assign) else None
+                assign[i] = (next((m for m in media_ids if m not in (assign[i - 1], nxt)), None)
+                             or next(m for m in media_ids if m != assign[i - 1]))
+    return assign
+
+
 def _faces(meta: dict, sw: float, sh: float) -> list[tuple[float, float, float, float]]:
     fr = ((meta.get("faces") or {}).get("frames") or [])
     if not fr:
@@ -526,11 +565,84 @@ def place_text(spec: dict, tr: dict, faces_at, W: int, H: int) -> tuple[dict, bo
     return tr, False
 
 
+HUE_NAMES = [(15, "red"), (40, "orange"), (65, "yellow"), (160, "green"), (200, "teal"), (250, "blue"), (290, "purple"), (345, "pink"), (361, "red")]
+
+
+def hue_name(h: float) -> str:
+    h = h % 360
+    return next(n for lim, n in HUE_NAMES if h < lim)
+
+
+def selective_targets(t: dict) -> list[tuple[str, int, float, float, dict]]:
+    """Every selective-colour filter in the template: (where, index, startBeat, endBeat, filter)."""
+    out = []
+    for i, L in enumerate(t.get("layers", [])):
+        for f in L.get("filters", []):
+            if f.get("type") == "selective":
+                out.append(("layer", i, L["startBeat"], L["startBeat"] + L["lengthBeats"], f))
+    for i, sl in enumerate(t["slots"]):
+        for f in sl.get("filters") or []:
+            if f.get("type") == "selective":
+                out.append(("slot", i, sl["startBeat"], sl["startBeat"] + sl["lengthBeats"], f))
+    return out
+
+
+def suggest_accent(t: dict, assign: list[str], metas: dict) -> dict | None:
+    """The most striking accent colour among the media shown under the template's (first)
+    selective-colour filter, to keep in colour instead of the template's original hue."""
+    from .analysis import accent
+    tg = selective_targets(t)
+    if not tg:
+        return None
+    _, _, b0, b1, f = tg[0]
+    th = float(f["params"].get("hue", 25))
+    cands = []
+    for i, sl in enumerate(t["slots"]):
+        if sl["startBeat"] < b1 - 1e-6 and sl["startBeat"] + sl["lengthBeats"] > b0 + 1e-6:
+            a = accent(metas[assign[i]])
+            if a:
+                cands.append({**a, "mediaId": assign[i], "slot": i})
+    if not cands:
+        shots = [i for i, sl in enumerate(t["slots"]) if sl["startBeat"] < b1 - 1e-6 and sl["startBeat"] + sl["lengthBeats"] > b0 + 1e-6]
+        # another of the user's files has a striking colour: say which, so they can swap it into the selective shot
+        others = [(a, m) for m in dict.fromkeys(assign) if m not in {assign[i] for i in shots} and (a := accent(metas[m]))]
+        best_other = max(others, key=lambda x: x[0]["score"]) if others else None
+        return {"hue": None, "templateHue": th, "templateName": hue_name(th), "params": dict(f["params"]),
+                "mediaId": assign[shots[0] if shots else 0], "shots": shots,
+                "hint": {"mediaId": best_other[1], "name": hue_name(best_other[0]["hue"])} if best_other else None}
+    best = max(cands, key=lambda c: c["score"])
+    return {**best, "templateHue": th, "params": {**f["params"], "hue": best["hue"]},
+            "name": hue_name(best["hue"]), "templateName": hue_name(th)}
+
+
+def _apply_accent(t: dict, assign: list[str], metas: dict, accent, report: list[str]) -> None:
+    tg = selective_targets(t)
+    if not tg or accent == "keep":
+        return
+    sug = None
+    if isinstance(accent, (int, float)) and not isinstance(accent, bool):
+        hue = float(accent) % 360
+    else:
+        sug = suggest_accent(t, assign, metas)
+        if not sug or sug.get("hue") is None:
+            report.append(f"No striking accent colour in the shots under the selective-colour section, so the template's "
+                          f"{hue_name(float(tg[0][4]['params'].get('hue', 25)))} is kept. Pick one with the eyedropper "
+                          f"(Colour & effects > Selective colour).")
+            return
+        hue = sug["hue"]
+    old = float(tg[0][4]["params"].get("hue", 25))
+    for _, _, _, _, f in tg:
+        f["params"] = {**f["params"], "hue": round(hue, 1)}
+    src = f" (found in shot {sug['slot'] + 1})" if sug else ""
+    report.append(f"Selective colour keeps {hue_name(hue)} (hue {hue:.0f} deg){src} instead of the template's {hue_name(old)}.")
+
+
 def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, texts: dict[str, str] | None = None,
-             name: str = "", slot_media: list[str] | None = None, color: bool = True) -> tuple[Project, list[str]]:
+             name: str = "", slot_media: list[str] | None = None, color: bool = True, accent="auto") -> tuple[Project, list[str]]:
     """Build a normal project from a template. `media_ids` fill the template's distinct media (refs) in
     order; `slot_media` (one id per slot) overrides that. Returns (project, report)."""
     report: list[str] = []
+    t = copy.deepcopy(t)  # adaptations (accent colour...) never change the stored template
     texts = texts or {}
     mmeta = load_meta(music_id)
     if not mmeta or not mmeta.get("beats"):
@@ -540,51 +652,20 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
     T = lambda b: song.time(b0 + b) - song.time(b0)  # noqa: E731  timeline seconds of template beat b
     need = total_beats(t)
     if b0 + need > len(song.t) - 1:
-        report.append(f"The song has detected beats up to {song.t[-1]:.1f} s; the last {b0 + need - (len(song.t) - 1):.0f} beats use its tempo "
-                      f"({60 / song.period:.1f} BPM) beyond that. Pick an earlier start for a perfect fit.")
+        report.append(f"The song has detected beats up to {song.t[-1]:.1f} s; the last {b0 + need - (len(song.t) - 1):.0f} beats continue at its tempo "
+                      f"({60 / song.period:.1f} BPM) beyond that." + (" Pick an earlier start for a perfect fit." if music_start > 0.5 else ""))
     src_start = song.time(b0)
     total = T(need)
     if src_start + total > float(mmeta.get("duration") or 0) + 0.05:
-        report.append(f"The song ends {src_start + total - float(mmeta['duration']):.1f} s before the template: the end is silent. Pick an earlier start.")
+        report.append(f"The song ends {src_start + total - float(mmeta['duration']):.1f} s before the template: the end is silent."
+                      + (" Pick an earlier start." if music_start > 0.5 else ""))
 
     # media -> slots
-    refs = int(t.get("refs") or len(t["slots"]))
     metas = {m: load_meta(m) for m in set(media_ids + (slot_media or []))}
     if any(v is None for v in metas.values()):
         raise ValueError("Some of the chosen media no longer exist.")
-    if slot_media:
-        assign = list(slot_media)
-        if len(assign) != len(t["slots"]):
-            raise ValueError("slot_media needs one media id per slot.")
-    else:
-        if not media_ids:
-            raise ValueError("Add at least one photo or video.")
-        ref_media = [media_ids[i % len(media_ids)] for i in range(refs)]
-        assign = [ref_media[s["ref"]] for s in t["slots"]]
-        if len(media_ids) < refs:
-            report.append(f"The template has {refs} different shots and you gave {len(media_ids)} files: "
-                          f"files are reused in order (shot {len(media_ids) + 1} shows file 1 again, and so on).")
-        extra = media_ids[refs:]
-        if extra:
-            seen, k = set(), 0
-            for i, s in enumerate(t["slots"]):
-                if s["ref"] in seen and k < len(extra):
-                    assign[i] = extra[k]
-                    k += 1
-                seen.add(s["ref"])
-            used = k
-            if used:
-                report.append(f"You gave {len(media_ids)} files for {refs} shots: {used} extra file(s) replace repeated shots "
-                              f"(slots that showed an earlier photo again).")
-            if used < len(extra):
-                report.append(f"{len(extra) - used} file(s) were not used (no free slots); drag them onto the timeline if you want them.")
-        if len(set(media_ids)) > 1:  # never the same file twice in a row when files are reused
-            for i in range(1, len(assign)):
-                if assign[i] == assign[i - 1]:
-                    nxt = assign[i + 1] if i + 1 < len(assign) else None
-                    alt = (next((m for m in media_ids if m not in (assign[i - 1], nxt)), None)
-                           or next(m for m in media_ids if m != assign[i - 1]))
-                    assign[i] = alt
+    assign = assign_media(t, media_ids, slot_media, report)
+    _apply_accent(t, assign, metas, accent, report)
 
     p = new_project(name or t["name"], t["settings"].get("aspect", "9:16"))
     st = t["settings"]
@@ -610,6 +691,7 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
         report.append(f"Colour-matched {len(grades)} shots to each other (exposure {min(ev):+.2f} to {max(ev):+.2f} EV, white balance evened out).")
 
     slot_clips = []
+    muted_videos = 0
     for i, s in enumerate(t["slots"]):
         mid = assign[i]
         m = metas[mid]
@@ -620,6 +702,12 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
               "keyframes": _kf_from_beats(s.get("keyframes"), s["startBeat"], T), "filters": copy.deepcopy(s.get("filters") or []),
               "extend": False, "speed": 1}
         if m["type"] == "video":
+            au = s.get("audio") or {}
+            if au.get("muted") is False:
+                cd["volume"] = au.get("volume", 1)
+            else:
+                cd["muted"] = True
+                muted_videos += 1
             dur = float(m.get("duration") or 0)
             if dur >= D:
                 cd["inPoint"] = round(min(1.0, (dur - D) / 2), 4)
@@ -635,6 +723,9 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
         clip = Clip.model_validate(cd)
         main.clips.append(clip)
         slot_clips.append(clip)
+    if muted_videos:
+        report.append(f"{muted_videos} video shot(s) play without their own sound so the song carries the edit "
+                      f"(select a clip and untick Mute to bring it back).")
     from .models import Transition
     for i, s in enumerate(t["slots"][:-1]):
         tro = s.get("transitionOut")
@@ -727,7 +818,7 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
     p.export.preset = ex.get("preset", p.export.preset)
     p.export.fileName = name or t["name"]
     p.media = list(dict.fromkeys([*assign, music_id, *[c.mediaId for tr in p.tracks for c in tr.clips if c.mediaId]]))
-    report.insert(0, f"{len(t['slots'])} shots fitted to the song at {60 / song.period:.1f} BPM from {src_start:.2f} s "
+    report.insert(0, f"{len(t['slots'])} shots fitted to the song at {float(mmeta.get('bpm') or 60 / song.period):.1f} BPM from {max(0.0, src_start):.2f} s "
                      f"(template made at {t.get('bpm', 0):.1f} BPM): every cut is on a beat; {total:.1f} s long.")
     return p, report
 
@@ -788,8 +879,9 @@ def placeholder_media(n: int) -> list[str]:
     return ids
 
 
-def synth_music(bpm: float, seconds: float, out: Path) -> list[float]:
-    """A simple CC0 beat (kick, hat, bass, pad) at `bpm`; returns the exact beat times."""
+def synth_music(bpm: float, seconds: float, out: Path, drop_at: float | None = None) -> list[float]:
+    """A simple CC0 beat (kick, hat, bass, pad) at `bpm`; returns the exact beat times. With
+    `drop_at` (seconds) the part before it is a quiet build-up (soft kick, no bass)."""
     sr = 48000
     n = int(seconds * sr)
     t = np.arange(n) / sr
@@ -804,14 +896,16 @@ def synth_music(bpm: float, seconds: float, out: Path) -> list[float]:
         if L <= 0:
             continue
         tt = np.arange(L) / sr
-        x[s:s + L] += 0.9 * np.sin(2 * np.pi * np.cumsum(45 + 90 * np.exp(-tt * 30)) / sr) * np.exp(-tt * 9)
+        quiet = drop_at is not None and b < drop_at - 1e-6
+        x[s:s + L] += (0.25 if quiet else 0.9) * np.sin(2 * np.pi * np.cumsum(45 + 90 * np.exp(-tt * 30)) / sr) * np.exp(-tt * 9)
         h = s + int(period / 2 * sr)
         if h + 2000 < n:
-            x[h:h + 2000] += 0.15 * rng.standard_normal(2000) * np.exp(-np.arange(2000) / 300)
+            x[h:h + 2000] += 0.06 * rng.standard_normal(2000) * np.exp(-np.arange(2000) / 300)
         f = roots[(i // 8) % 4]
         bl = min(n - s, int(period * sr))
         tb = np.arange(bl) / sr
-        x[s:s + bl] += 0.25 * np.sign(np.sin(2 * np.pi * f * tb)) * np.exp(-tb * 4)
+        if not quiet:
+            x[s:s + bl] += 0.25 * np.sign(np.sin(2 * np.pi * f * tb)) * np.exp(-tb * 4)
     for k, f in enumerate([220, 277.2, 329.6]):
         x += 0.04 * np.sin(2 * np.pi * f * t + k)
     x = np.tanh(x * 1.2) * 0.8

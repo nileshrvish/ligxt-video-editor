@@ -1,18 +1,35 @@
 // Safe-area warnings: a note in Properties, a badge + list under the preview, and boxes on the canvas.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { safetyWarnings, faceBoxes, textBoxAt, type SafetyWarning } from "../player/safety";
 import { useEditor } from "../store/editor";
 import { onTextAssets } from "../text/cache";
 import { clipEnd } from "../util";
 import { Icon } from "./Icons";
 
-/** Warnings for the whole project (recomputed when it changes or a text layout arrives). */
+// One shared result for every component that shows warnings, computed when editing pauses
+// (not on every step of a drag) and only once per project state.
+let shared: { project: unknown; media: unknown; tick: number; result: SafetyWarning[] } = { project: null, media: null, tick: -1, result: [] };
+let assetTick = 0;
+onTextAssets(() => { assetTick++; });
+
+/** Warnings for the whole project (recomputed 300 ms after it changes, or when a text layout arrives). */
 export function useSafety(): SafetyWarning[] {
   const project = useEditor((s) => s.project);
   const media = useEditor((s) => s.media);
-  const [tick, setTick] = useState(0);
-  useEffect(() => onTextAssets(() => setTick((n) => n + 1)), []);
-  return useMemo(() => (project ? safetyWarnings(project, media) : []), [project, media, tick]);
+  const [, force] = useState(0);
+  const [tick, setTick] = useState(assetTick);
+  useEffect(() => onTextAssets(() => setTick(assetTick)), []);
+  useEffect(() => {
+    if (shared.project === project && shared.media === media && shared.tick === tick) return;
+    const h = setTimeout(() => {
+      if (!(shared.project === project && shared.media === media && shared.tick === tick)) {
+        shared = { project, media, tick, result: project ? safetyWarnings(project, media) : [] };
+      }
+      force((n) => n + 1);
+    }, 300);
+    return () => clearTimeout(h);
+  }, [project, media, tick]);
+  return shared.result;
 }
 
 export function SafetyNote({ clipId }: { clipId: string }) {

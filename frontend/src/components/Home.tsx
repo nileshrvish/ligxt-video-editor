@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { navigate } from "../router";
 import TemplatesGallery from "./Templates";
+import { MediaCleanupDialog, RecentExports, RecoveryNotice, useVersion } from "./HomeExtras";
 import { toastError, useApp } from "../store/app";
 import type { ProjectSummary } from "../types";
 import { fmtDuration, timeAgo } from "../util";
@@ -73,6 +74,8 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
 export default function Home() {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [cleanup, setCleanup] = useState(false);
+  const ver = useVersion();
   const toast = useApp((s) => s.toast);
 
   const refresh = () =>
@@ -113,7 +116,7 @@ export default function Home() {
           <Logo size={34} />
           <div>
             <h1>Ligxt Video Editor</h1>
-            <div className="tag">Local editing for Reels, Shorts and more</div>
+            <div className="tag">Local editing for Reels, Shorts and more{ver ? ` · v${ver.version}` : ""}</div>
           </div>
         </div>
 
@@ -130,9 +133,13 @@ export default function Home() {
           </button>
         </div>
 
+        <RecoveryNotice projects={projects} />
         <div className="section-title">
           Recent projects
           <span className="spacer" />
+          <button className="btn ghost sm" onClick={() => setCleanup(true)} title="Find imported files no project uses, and free the space">
+            <Icon name="trash" size={14} /> Media cleanup
+          </button>
           <button className="btn ghost sm" onClick={() => api.openFolder().catch((e) => toastError("Could not open folder", e))}>
             <Icon name="folder" size={14} /> Exports folder
           </button>
@@ -167,8 +174,10 @@ export default function Home() {
           </div>
         )}
         <TemplatesGallery />
+        <RecentExports />
       </div>
       {showNew && <NewProjectDialog onClose={() => setShowNew(false)} />}
+      {cleanup && <MediaCleanupDialog onClose={() => setCleanup(false)} />}
     </div>
   );
 }

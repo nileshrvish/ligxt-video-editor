@@ -155,7 +155,41 @@ async def import_zip(request: Request):
     return {"template": TP.summary(TP.load(t["id"])), "previewJobId": job}
 
 
+class AccentBody(BaseModel):
+    media: list[str] = []
+
+
+@router.post("/{tid}/accent")
+def accent_suggestion(tid: str, body: AccentBody):
+    """Suggested accent colour for the template's selective-colour section with these media, with previews."""
+    from .analysis import accent_preview
+    from .config import CACHE_DIR
+    from .media import load_meta
+    t = _load(tid)
+    if not TP.selective_targets(t):
+        return {"selective": False}
+    metas = {m: load_meta(m) for m in body.media}
+    if not body.media or any(v is None for v in metas.values()):
+        raise HTTPException(400, "Add the photos and videos first.")
+    assign = TP.assign_media(t, body.media)
+    sug = TP.suggest_accent(t, assign, metas) or {}
+    out = {"selective": True, **{k: v for k, v in sug.items() if k != "params"}}
+    d = CACHE_DIR / "_accent"
+    d.mkdir(parents=True, exist_ok=True)
+    mid = sug.get("mediaId")
+    if mid:
+        for key, hue in (("preview", sug.get("hue")), ("templatePreview", sug.get("templateHue"))):
+            if hue is None:
+                continue
+            f = d / f"{mid}_{round(hue)}.jpg"
+            if not f.exists():
+                accent_preview(metas[mid], {**sug["params"], "hue": hue}, f)
+            out[key] = f"/files/cache/_accent/{f.name}"
+    return out
+
+
 class GenerateBody(BaseModel):
+    accent: float | str = "auto"  # "auto" (suggested), "keep" (template's colour) or a hue in degrees
     media: list[str] = []
     slotMedia: list[str] | None = None
     music: str | None = None  # media id; None = the template's bundled song (if any)
@@ -173,7 +207,8 @@ def generate(tid: str, body: GenerateBody):
         music = body.music or TP.music_media_for(t) if (body.music or (t.get("music") or {}).get("file")) else body.music
         if not music:
             raise ValueError("This template needs a song: pick one.")
-        p, report = TP.generate(t, body.media, music, body.musicStart, body.texts, body.name or t["name"], body.slotMedia)
+        p, report = TP.generate(t, body.media, music, body.musicStart, body.texts, body.name or t["name"], body.slotMedia,
+                                accent=body.accent)
         save_project(p)
         ctx.message("Project created")
         return {"projectId": p.id, "report": report}

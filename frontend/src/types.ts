@@ -103,6 +103,8 @@ export interface MediaMeta {
   beats?: number[]; // beat times in source seconds
   sfx?: string; // bundled sound effect id (sfx/), if this is one
   sfxPeak?: number; // seconds into the effect that should land on the cut
+  /** The original file was moved or deleted outside Ligxt (relink it). */
+  fileMissing?: boolean;
   /** Detected faces (normalised source boxes [x, y, w, h, score]); photos have one frame. */
   faces?: { version: number; frames: { t: number; boxes: [number, number, number, number, number][] }[] };
 }

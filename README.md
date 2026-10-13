@@ -20,13 +20,31 @@ This creates `.venv` (Python 3.11), installs the backend packages, installs and 
 
 ## Start
 
+**Easiest:** double-click **Ligxt Video Editor** on the Desktop (or in the Start menu). It starts Ligxt without a terminal window, opens your browser, and puts an icon in the system tray (bottom right): **Open Ligxt**, **Exports folder**, **Stop Ligxt** (stops the server cleanly). If Ligxt is already running, the shortcut just opens it. To recreate the shortcuts: `.\install_shortcut.ps1` (setup does this).
+
+From a terminal:
+
 ```powershell
 .\start.ps1                # opens http://127.0.0.1:8765 in your browser
 .\start.ps1 -Port 9000     # different port
 .\start.ps1 -NoBrowser     # don't open a browser tab
 ```
 
-Stop it with **Ctrl+C** in the PowerShell window.
+```bash
+./start.sh                 # Git Bash; -p 9000 for another port, -n for no browser
+```
+
+Stop it with **Ctrl+C** in the terminal. The version (v1.0.0) is shown on the Home screen and in the keyboard-shortcuts dialog (**?**), which also has "Show the tour again".
+
+## Safety nets
+
+- **Crash recovery**: every change is also kept in the browser until it is saved. If the tab or the server closed before the next autosave, opening the project offers **Restore** or **Discard**, and the Home screen tells you which projects have unsaved changes.
+- **Two tabs**: a project can be edited in one tab at a time. Opening it in a second tab offers **View read-only** or **Edit here instead** (the first tab then becomes read-only, so neither overwrites the other).
+- **Moved or deleted files**: the media library marks them "File missing"; click **Relink** and pick the file (same type). Every clip that used it works again. Exports name the missing files instead of failing silently.
+- **Disk space**: exports and proxy generation check the free space first and tell you how much is needed.
+- **Media cleanup** (Home): lists imported files no project uses, with their size; delete the ones you don't need.
+- **Recent exports** (Home): play, show in folder, or **Re-export** with the same settings (exports from v1.0 on).
+- **Background work**: the pill in the top bar lists every running task (proxies, exports, captions, templates) with progress, time left and Cancel; you can keep editing.
 
 ## Folders
 
@@ -97,7 +115,7 @@ Timeline mouse: drag a clip to move it (or to another track of the same kind), d
 
 - **Save as template** (editor top bar) stores a project's structure and style, never your photos or videos: shot slots with lengths in beats, sections (from markers named Breakdown, Drop, Peak, Outro...), transitions, motion per shot (zoom / pan / punch-ins / shake), grade (adjustment layers, presets, LUTs, selective colour), text styles and animations with placeholder text, beat captions, sound effects and the export preset. Your song is bundled only if it is license-safe (CC0 / own / synthesized); otherwise the template asks for a song.
 - **Gallery** (Home screen): cards with thumbnail, animated preview on hover, length, media slots, tags; search and categories; Use, export as .zip, duplicate, rename/tags/new preview, delete; Import .zip. Three built-in starters: Quick beat montage, Photo slideshow with Ken Burns, Before/after reveal.
-- **Use template**: 1) drop photos/videos (their order fills the shots; drag to swap; fewer files are reused, extra files replace repeated shots), 2) pick a song (beats are detected; choose the start point, it snaps to a beat), 3) fill in the hook title, beat captions and closing line, 4) create. The result is a normal, fully editable project, plus a report of what was adapted.
+- **Use template**: 1) drop photos/videos (their order fills the shots; drag to swap; fewer files are reused, extra files replace repeated shots), 2) pick a song (beats are detected; the song's energy curve shows its drop and where the template's drop will land; **Line up the drop** picks that start for you; the start always snaps to a beat), 3) fill in the hook title, beat captions and closing line, and (for templates with selective colour) choose between the most striking colour in your photos and the template's colour, each with a preview, 4) create. Video clips in a template play without their own sound by default. The result is a normal, fully editable project, plus a report of what was adapted.
 - What adapts automatically: every cut, transition, caption word and sound effect is re-timed to the new song's beats; zooms are re-aimed at each photo's face; faces are kept out of the Reels header, caption area and buttons (photos get an extended canvas when they have to move); landscape or off-centre photos are reframed onto the face; shots are colour-matched to each other; text moves off faces.
 - **.zip files** contain `template.json` (with a `version`; older versions are upgraded on import) and a license-safe song if there is one. No personal media.
 
@@ -108,7 +126,7 @@ Timeline mouse: drag a clip to move it (or to another track of the same kind), d
 - **Beat-synced words**: *♪ Sync words to the beat* puts one word on each beat (or half / every second beat) of the music under the text; with the *Reveal + pop* highlight each word appears exactly on its beat.
 - **Animations**: In and Out separately: fade, slide (from below/above/left/right), pop/scale, typewriter, word by word, each with a duration and easing. Position, scale, rotation and opacity take ◆ keyframes like clips.
 - **Auto-captions** (`CC Captions`): speech on the video and audio tracks is transcribed locally with faster-whisper (GPU when available, free). The first run downloads the model (about 460 MB for "small") into `models\whisper`. Captions land on a "Captions" track as short segments with word timings, placed above the Reels caption area. Highlight styles: karaoke pop, karaoke colour, reveal as spoken. Editing a caption's text keeps the timings; splitting a caption splits its words. If there is no speech, you are told so and nothing is added.
-- **Safe areas**: the preview warns when text or a detected face sits under the Reels header, the caption area or the buttons (badge next to *Safe areas*; click a warning to jump there). Faces are found on import (OpenCV YuNet, `modelsace_detection_yunet_2023mar.onnx`, MIT).
+- **Safe areas**: the preview warns when text or a detected face sits under the Reels header, the caption area or the buttons (badge next to *Safe areas*; click a warning to jump there). Faces are found on import (OpenCV YuNet, `models\face_detection_yunet_2023mar.onnx`, MIT).
 - **Extend canvas** (photos, Properties > Frame): fills around the photo with a blurred, colour-matched extension, so a photo can be moved or zoomed out without showing its edges.
 
 ## Export settings
@@ -152,13 +170,14 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 
 `fonts\` holds the bundled fonts: Anton, Bebas Neue, Archivo Black, Poppins, DM Serif Display, Pacifico (SIL Open Font License 1.1) and Special Elite (Apache 2.0), from the Google Fonts repository. They may be used in any video, also commercially; licenses and sources are in `fonts\README.md` and next to each font.
 
-`modelsace_detection_yunet_2023mar.onnx` is OpenCV's YuNet face detector (MIT, `models\YUNET-LICENSE.txt`). The speech model for captions is downloaded on first use from Hugging Face (Systran/faster-whisper, MIT).
+`models\face_detection_yunet_2023mar.onnx` is OpenCV's YuNet face detector (MIT, `models\YUNET-LICENSE.txt`). The speech model for captions is downloaded on first use from Hugging Face (Systran/faster-whisper, MIT).
 
 `sfx\` holds sound effects synthesised from noise and sine waves by `scripts\make_sfx.py`; no recordings or samples are used, and they are released under **CC0 1.0** (see `sfx\LICENSE.md`).
 
 ## Troubleshooting
 
-- **"Cannot reach the Ligxt backend"**: the PowerShell window running `start.ps1` was closed. Start it again.
+- **"Cannot reach the Ligxt backend"**: Ligxt was stopped (tray > Stop Ligxt, or the terminal running `start.ps1` was closed). Start it again from the Desktop shortcut. Your last changes are offered for restore when you reopen the project.
+- **The shortcut does nothing**: see `cache\launcher.log` (for example, another program is using port 8765).
 - **A clip shows "Proxy failed"**: select the file and click **Rebuild proxy**. Export still uses the original either way.
 - **Port already in use**: `.\start.ps1 -Port 9000`.
 - **HDR iPhone footage looks washed out**: it is tone-mapped to SDR automatically in proxies and exports. If not, check that ffmpeg has `zscale` (the gyan.dev full build does).

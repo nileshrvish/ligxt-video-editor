@@ -13,3 +13,4 @@ __pycache__/
 user_luts/
 presets/
 models/whisper/
+.ligxt-running

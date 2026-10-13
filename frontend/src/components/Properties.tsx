@@ -17,7 +17,7 @@ export default function Properties() {
   const media = useEditor((s) => s.media);
   const selClip = useSelectedClip();
   return (
-    <div className="panel">
+    <div className="panel" data-tour="properties">
       <div className="panel-head">Properties</div>
       <div className="panel-body">
         {sel.kind === "transition" ? (

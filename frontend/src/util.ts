@@ -1,5 +1,11 @@
 import type { Clip, MediaMeta, Project, Track } from "./types";
 import { clipDuration as motionClipDuration } from "./motion/motion";
+import { current, isDraft } from "immer";
+
+/** Deep copy that also works on immer drafts (structuredClone can't copy a draft proxy). */
+export function deepClone<T>(x: T): T {
+  return structuredClone(isDraft(x) ? current(x) : x);
+}
 
 export const uid = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");

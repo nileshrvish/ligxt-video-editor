@@ -6,7 +6,7 @@
 //   reorders, trimming/deleting ripples. Turn off with track.magnetic = false.
 // - Every other track allows gaps but never overlaps: a clip lands in the nearest free slot.
 import type { Clip, Marker, Project, Track, TrackType } from "../types";
-import { clipDuration, clipEnd, uid } from "../util";
+import { clipDuration, clipEnd, deepClone, uid } from "../util";
 import { splitText } from "../text/edit";
 
 export const MIN_CLIP = 0.1; // seconds
@@ -188,7 +188,7 @@ export function splitClip(p: Project, clipId: string, time: number): string | nu
   if (time <= c.start + MIN_CLIP / 2 || time >= clipEnd(c) - MIN_CLIP / 2) return null;
   const speed = c.speed || 1;
   const cut = round(c.inPoint + (time - c.start) * speed);
-  const right: Clip = structuredClone(c);
+  const right: Clip = deepClone(c);
   right.id = uid();
   right.start = round(time);
   right.inPoint = cut;
@@ -239,7 +239,7 @@ export function deleteClip(p: Project, clipId: string, ripple = false): void {
 export function duplicateClip(p: Project, clipId: string): string | null {
   const hit = findClip(p, clipId);
   if (!hit || hit.track.locked) return null;
-  const copy: Clip = structuredClone(hit.clip);
+  const copy: Clip = deepClone(hit.clip);
   copy.id = uid();
   const t = hit.track;
   if (isMagnetic(t)) {

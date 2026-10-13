@@ -155,7 +155,7 @@ def test_export_errors_are_clear(client):
     assert r.status_code == 400 and "main video track is empty" in r.json()["detail"]
     p["tracks"][0]["clips"] = [{"mediaId": "0123456789ab", "start": 0, "inPoint": 0, "outPoint": 1}]
     r = client.post(f"/api/projects/{p['id']}/export", json={"project": p})
-    assert r.status_code == 400 and "no longer exists" in r.json()["detail"]
+    assert r.status_code == 400 and "missing" in r.json()["detail"] and "Relink" in r.json()["detail"]
 
 
 def test_cancel_export(client, fixtures):

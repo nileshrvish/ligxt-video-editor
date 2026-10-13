@@ -1,3 +1,4 @@
+import { CLIENT_ID } from "./session";
 import type { Job, MediaMeta, Project, ProjectSummary, TemplateSummary } from "./types";
 
 export class ApiError extends Error {
@@ -24,7 +25,7 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   try {
     res = await fetch(url, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers: { ...(body !== undefined ? { "Content-Type": "application/json" } : {}), "X-Ligxt-Client": CLIENT_ID },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
@@ -77,7 +78,8 @@ export const api = {
     if (!r.ok) throw await parseError(r);
     return (await r.json()) as { template: TemplateSummary; previewJobId: string | null };
   },
-  generateFromTemplate: (id: string, body: { media: string[]; music: string | null; musicStart: number; texts: Record<string, string>; name: string }) =>
+  templateAccent: (id: string, media: string[]) => req<any>("POST", `/api/templates/${id}/accent`, { media }),
+  generateFromTemplate: (id: string, body: { media: string[]; music: string | null; musicStart: number; texts: Record<string, string>; name: string; accent?: "auto" | "keep" | number }) =>
     req<{ jobId: string }>("POST", `/api/templates/${id}/generate`, body),
   sfxLibrary: () => req<{ sfx: { id: string; name: string; peak: number }[] }>("GET", "/api/media/sfx/library"),
   importSfx: (id: string) => req<{ media: MediaMeta; jobId: string }>("POST", `/api/media/sfx/${id}/import`),
