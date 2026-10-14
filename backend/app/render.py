@@ -980,6 +980,9 @@ def run_export(project: Project, mode: str, range_start: float | None, range_end
         try:
             run_ffmpeg(args, plan.duration, lambda p: ctx.progress(r0_ + p * (0.98 - r0_), "Rendering"),
                        ctx.cancelled, ctx.set_process, cwd=str(rdir))
+            if not tmp.exists():  # seen once: ffmpeg ended "successfully" without writing the file
+                raise RenderError(f"The export finished without writing {tmp.name}. Please export again; if it keeps happening, "
+                                  "check that the exports folder isn't locked by another program (antivirus, sync).")
             tmp.replace(plan.output)
         except BaseException:
             tmp.unlink(missing_ok=True)

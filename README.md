@@ -122,6 +122,18 @@ Colour & effects: select a clip and open **Colour & effects** in Properties.
 
 Timeline mouse: drag a clip to move it (or to another track of the same kind), drag its edges to trim, drag a marker flag to move it, double-click a track name to rename it. The main video track is magnetic by default (no gaps; dragging reorders). Turn that off with the **Magnetic** button.
 
+## Auto-edit from raw footage
+
+**Home > Auto-edit** makes a beat-synced first cut from a folder of clips and photos and a song, and you review it before the project is created.
+
+1. **Footage**: *Choose a folder…* (videos and photos are imported; a song in it becomes the music), or use the clips of an existing project.
+2. **Song and style**: *Energetic* (quick cuts, punch-ins, slow-motion slams on the drop, ~18 s), *Cinematic* (longer steady shots, push-ins, fades, the title behind the person, ~24 s) or *Chill* (calm shots, soft slow motion, dissolves, ~24 s); *No template* (beat-sync to the song, built around its drop) or one of your templates; an optional title and closing line.
+3. **Analyse** (background job with progress and Cancel; cached per clip, so the second time is instant): shots (scene detection), and for every moment sharpness, exposure, faces (and whether they face the camera), motion, steadiness and composition; near-duplicates; unusable moments (blur, black, lens covered, extreme shake). It runs on the CPU, at roughly 8-14x real time on 4K footage.
+4. **Review**: the shots in order with thumbnails, scores and short reasons ("sharp, 2 faces to camera, high motion"). *Swap* a shot for one of the ranked alternatives, *Lock* the ones you like, *Exclude clip* to leave a clip out, *Regenerate* the rest (locked shots stay), or switch the style.
+5. **Create**: a normal, fully editable project and a report of what was chosen and why.
+
+How the draft is built: calm, steady shots in the intro and breakdown, the strongest high-motion shot right on the drop, high-motion shots on the peak, a wide calm shot to end on; the best moment inside each shot (not just its start); no two similar shots in a row, the same clip never back to back, wide and close shots mixed, shot lengths varied; clips that look unlike the rest (or are very dark) are used sparingly. Landscape clips in a 9:16 project are auto-reframed on their main face or subject; the title is kept inside the safe areas and away from faces, tracked above a face (Energetic) or put behind the person (Cinematic); 24/25 fps footage gets AI frame-rate conversion. No sound effects.
+
 ## AI slow motion
 
 Slow a video clip below 1x (Properties > Motion > Speed, a speed ramp, or a template) and Ligxt fills in the missing frames.
@@ -229,12 +241,15 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 | BiRefNet dynamic (matting) | MIT | 424 MB | huggingface.co/ZhengPeng7/BiRefNet_dynamic-matting |
 | RIFE 4.26 (AI slow motion), hzwer/Practical-RIFE | MIT | 23 MB download, 24.6 MB on disk | huggingface.co/hzwer/RIFE (revision 01fdc7e9; only `flownet.pkl` is kept; the network code is included in `ai_worker\rife_net.py`, so no downloaded code is run) |
 | SAM 2.1 small (click to select), Meta | Apache-2.0 | 176 MB | github.com/facebookresearch/sam2 (code pinned to commit 2b90b9f5, checkpoint from dl.fbaipublicfiles.com) |
+| PySceneDetect 0.6.4 (shot detection for Auto-edit, runs in the main environment) | BSD-3-Clause | 1 MB | PyPI `scenedetect` (with `platformdirs`, MIT) |
 | PyTorch, torchvision | BSD-3-Clause | ~3 GB (ai-venv) | pytorch.org |
 | transformers, safetensors, timm, kornia | Apache-2.0 | | PyPI |
 | einops, hydra-core, iopath | MIT | | PyPI |
 | omegaconf, antlr4 runtime, portalocker, numpy | BSD-3-Clause | | PyPI |
 
 Not used: **RobustVideoMatting** is GPL-3.0 (its weights carry no separate license), so it was left out and not run; it can be added if you approve its license. **MODNet** (Apache-2.0) publishes its weights only on Google Drive, which can't be checksum-pinned reliably.
+
+**Disk space**: the AI models take 1.6 GB (`models\ai`; delete unused ones in Settings), the speech model 1.9 GB (`models\whisper`, downloaded on first use of captions), YuNet and VitTrack under 1 MB. Auto-edit's analysis cache is about 60 KB per clip (`cache\<media>\autoedit`); proxies, slow-motion renders and cutouts live in `cache\` too (Settings > clear cutout cache; Home > Media cleanup).
 
 `stickers\` holds stickers drawn from simple shapes by `scripts\make_stickers.py` (no third-party artwork), released under **CC0 1.0** (`stickers\LICENSE.md`).
 
@@ -247,6 +262,7 @@ Not used: **RobustVideoMatting** is GPL-3.0 (its weights carry no separate licen
 - **A clip shows "Proxy failed"**: select the file and click **Rebuild proxy**. Export still uses the original either way.
 - **Cutout says the AI tools are not installed**: run `setup.ps1` again (it rebuilds `ai-venv` without touching anything else) and restart Ligxt. Settings > Check again shows what was found.
 - **Cutout is slow**: Settings shows whether it runs on the graphics card. On the CPU expect several seconds per frame; *BiRefNet lite* is about twice as fast as the default model.
+- **Auto-edit picks a shot you don't want**: in the review, *Swap* it for an alternative or *Exclude clip*; *Lock* the shots you like and *Regenerate*. Clips that look very different from the rest are used sparingly on purpose: lock one in if you want it.
 - **A tracked title or blur slips off its target**: move the playhead to where it goes wrong, drag the box onto the target and click *Re-track forward*. For a face that moves fast, raise the blur's padding.
 - **Slow motion warps or wobbles**: lower the slow-down (4x -> 2x), or choose *Frame blending* for that clip.
 - **"The graphics card ran out of memory"**: close games or other GPU apps, or lower Settings > GPU memory limit.

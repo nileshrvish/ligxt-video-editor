@@ -476,3 +476,27 @@ button.jobs-pill { border: 0; cursor: pointer; font: inherit; }
 .clip-weak { position: absolute; bottom: 0; height: 3px; pointer-events: none; }
 .clip-weak.lost { background: #ff4d4d; }
 .clip-weak.low { background: #ffb020; }
+
+/* Auto-edit wizard */
+.ae .ae-clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; max-height: 280px; overflow: auto; }
+.ae .ae-clip img, .ae .ae-clip .ph { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 6px; background: var(--panel-2, #222); display: block; }
+.ae .ae-clip small { font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ae .ae-styles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.ae .ae-styles .choice { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 10px; }
+.ae .ae-styles .choice span { font-size: 11px; opacity: .75; }
+.ae-review { display: flex; flex-direction: column; gap: 6px; max-height: 52vh; overflow: auto; margin-top: 8px; }
+.ae-slot { display: grid; grid-template-columns: 70px 96px 1fr auto; gap: 10px; align-items: center; padding: 6px; border-radius: 8px; border: 1px solid var(--border, #333); }
+.ae-slot.locked { border-color: var(--accent, #4cd2ff); }
+.ae-slot.sec-drop { background: rgba(255, 90, 90, .08); }
+.ae-slot img { width: 96px; height: 54px; object-fit: cover; border-radius: 4px; }
+.ae-time { font-size: 12px; font-variant-numeric: tabular-nums; display: flex; flex-direction: column; }
+.ae-time small { opacity: .7; }
+.ae-info { display: flex; flex-direction: column; min-width: 0; font-size: 12px; }
+.ae-info b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ae-reasons { font-size: 11px; color: var(--accent, #4cd2ff); }
+.ae-acts { display: flex; gap: 4px; }
+.ae-alts { grid-column: 1 / -1; display: flex; gap: 6px; overflow-x: auto; padding: 4px 0; }
+.ae-alt { border: 1px solid var(--border, #333); background: transparent; border-radius: 6px; padding: 3px; cursor: pointer; }
+.ae-alt img { width: 88px; height: 50px; }
+.ae-alt small { display: block; font-size: 10px; }
+.ae-report { white-space: pre-wrap; font-size: 11.5px; max-height: 46vh; overflow: auto; background: var(--panel-2, #1a1a1a); padding: 8px; border-radius: 6px; }

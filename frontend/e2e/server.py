@@ -48,6 +48,12 @@ fx = HERE / ".fixtures"
 fx.mkdir(exist_ok=True)
 if not (fx / "object.mp4").exists():
     moving_object(fx / "object.mp4")
+if not (fx / "pattern.mp4").exists():  # a second, calm clip
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=5", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    str(fx / "pattern.mp4")], check=True)
+if not (fx / "song.wav").exists():  # a synthesized song with a drop (CC0), for the auto-edit wizard
+    from app import templates as _TP  # noqa: E402
+    _TP.synth_music(120, 30, fx / "song.wav", drop_at=8.0)
 
 import uvicorn  # noqa: E402
 
