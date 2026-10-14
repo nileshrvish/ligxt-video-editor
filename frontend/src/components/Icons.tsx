@@ -28,6 +28,8 @@ const paths: Record<string, string> = {
   copy: "M8 8h12v12H8zM4 16V4h12",
   refresh: "M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7",
   loader: "M12 3a9 9 0 1 0 9 9",
+  user: "M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM4 21a8 8 0 0 1 16 0",
+  target: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 1v4M12 19v4M1 12h4M19 12h4",
   volume: "M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6",
   mute: "M4 9h4l5-4v14l-5-4H4zM17 9l4 6M21 9l-4 6",
   eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",

@@ -17,3 +17,6 @@ models/whisper/
 ai-venv/
 models/ai/
 ai_settings.json
+frontend/e2e/.fixtures/
+frontend/test-results/
+frontend/playwright-report/

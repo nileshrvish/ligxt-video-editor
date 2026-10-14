@@ -134,6 +134,17 @@ Slow a video clip below 1x (Properties > Motion > Speed, a speed ramp, or a temp
 - Slow-mo is rendered in the background (progress, Cancel) and cached: a low-resolution version for the preview, full resolution for the export. A missing render is done inside the export job.
 - Speed on the RTX 4050 Laptop: about 7 in-between frames per second at 1080p and 2-3 at 4K (4K runs the flow at half resolution), using under 2.5 GB of graphics memory.
 
+## Motion tracking
+
+Select a video clip and open **Properties > Motion tracking**.
+
+- **Track**: *Face* finds the faces on the frame at the playhead (several: click the one to follow on the preview); *Draw a box* around any object on the preview; *Click (AI)* on an object for the AI tracker (SAM 2.1, best for things that change shape). *From here*: both ways, forward or backward from the playhead. Tracking runs in the background with progress and Cancel.
+- **On the preview**: the tracked path around the playhead (orange = uncertain, red = lost) and the box on this frame. If it's wrong on a frame, drag the box (or a corner) onto the target, then **Re-track forward / backward**. Uncertain and lost stretches are marked along the bottom of the clip on the timeline.
+- When the target leaves the picture or is hidden for a moment, the track holds its last position and picks it up again when it comes back.
+- **Add**: *Text*, a *Sticker* (map pin, heart, star, sparkle, arrow, ring, flame, cool face), a *Blur* or *Pixelate* that follow it (hide a face or a number plate; padding, soft edge, strength). Any text, overlay clip or adjustment layer can follow a track: **Follow a face or object** in its properties (position, scale, rotation, smoothing, offset, keep inside the Reels safe areas). An adjustment layer that follows a track only grades inside that region.
+- **Auto-reframe**: turns a landscape clip into 9:16 (or any frame) by panning across the whole picture so the tracked subject stays in the centre, or on the left/right third, with a smooth virtual camera that never shows an edge.
+- Tracks belong to the clip's media in source frames, so they keep working after trimming, splitting, speed changes, slow motion and Cutout. Templates keep text pinned to a face (and auto-reframe or a blur on a face) and track the main face of the new media.
+
 ## Motion, speed and audio
 
 - **Transform**: select a clip and drag it in the preview (move; corners scale; the round knob rotates, Shift = 15° steps), or use Properties > Transform (position, scale, rotation, opacity, flips, crop).
@@ -189,10 +200,15 @@ cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests
 # frontend unit tests (timeline editing logic)
 cd frontend; npm test
 
+# headless UI tests (Playwright; builds the UI, starts the backend on port 8799 with a throwaway data folder)
+cd frontend; npm run e2e
+
 # UI with hot reload: run the backend, then the Vite dev server on :5173
 .\start.ps1 -NoBrowser
 cd frontend; npm run dev
 ```
+
+The UI tests use Playwright's headless Chromium (installed with `npx playwright install chromium`); the preview-vs-export test plays H.264 video, which Playwright's Chromium can't decode, so it runs in the system's Microsoft Edge (headless, its own temporary profile).
 
 The project format is documented in `backend\app\models.py`. The ffmpeg graph builder is in `backend\app\render.py`. `POST /api/projects/<id>/export/preview-graph` returns the generated ffmpeg command without rendering it, which helps with debugging.
 
@@ -202,7 +218,7 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 
 `fonts\` holds the bundled fonts: Anton, Bebas Neue, Archivo Black, Poppins, DM Serif Display, Pacifico (SIL Open Font License 1.1) and Special Elite (Apache 2.0), from the Google Fonts repository. They may be used in any video, also commercially; licenses and sources are in `fonts\README.md` and next to each font.
 
-`models\face_detection_yunet_2023mar.onnx` is OpenCV's YuNet face detector (MIT, `models\YUNET-LICENSE.txt`). The speech model for captions is downloaded on first use from Hugging Face (Systran/faster-whisper, MIT).
+`models\face_detection_yunet_2023mar.onnx` is OpenCV's YuNet face detector (MIT, `models\YUNET-LICENSE.txt`). `models\object_tracking_vittrack_2023sep.onnx` is OpenCV's VitTrack object tracker (Apache-2.0, `models\VITTRACK-LICENSE.txt`; 0.7 MB, from huggingface.co/opencv/object_tracking_vittrack at revision 868e4c94, SHA-256 2990f0b7…478e91d). The speech model for captions is downloaded on first use from Hugging Face (Systran/faster-whisper, MIT).
 
 **AI models and libraries** (all checked before use; downloaded on first use from the pinned revision and verified by SHA-256):
 
@@ -220,6 +236,8 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 
 Not used: **RobustVideoMatting** is GPL-3.0 (its weights carry no separate license), so it was left out and not run; it can be added if you approve its license. **MODNet** (Apache-2.0) publishes its weights only on Google Drive, which can't be checksum-pinned reliably.
 
+`stickers\` holds stickers drawn from simple shapes by `scripts\make_stickers.py` (no third-party artwork), released under **CC0 1.0** (`stickers\LICENSE.md`).
+
 `sfx\` holds sound effects synthesised from noise and sine waves by `scripts\make_sfx.py`; no recordings or samples are used, and they are released under **CC0 1.0** (see `sfx\LICENSE.md`).
 
 ## Troubleshooting
@@ -229,6 +247,7 @@ Not used: **RobustVideoMatting** is GPL-3.0 (its weights carry no separate licen
 - **A clip shows "Proxy failed"**: select the file and click **Rebuild proxy**. Export still uses the original either way.
 - **Cutout says the AI tools are not installed**: run `setup.ps1` again (it rebuilds `ai-venv` without touching anything else) and restart Ligxt. Settings > Check again shows what was found.
 - **Cutout is slow**: Settings shows whether it runs on the graphics card. On the CPU expect several seconds per frame; *BiRefNet lite* is about twice as fast as the default model.
+- **A tracked title or blur slips off its target**: move the playhead to where it goes wrong, drag the box onto the target and click *Re-track forward*. For a face that moves fast, raise the blur's padding.
 - **Slow motion warps or wobbles**: lower the slow-down (4x -> 2x), or choose *Frame blending* for that clip.
 - **"The graphics card ran out of memory"**: close games or other GPU apps, or lower Settings > GPU memory limit.
 - **Port already in use**: `.\start.ps1 -Port 9000`.

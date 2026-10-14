@@ -445,3 +445,34 @@ button.jobs-pill { border: 0; cursor: pointer; font: inherit; }
 .pick-dot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); pointer-events: none; }
 .pick-dot.on { background: #34c759; }
 .pick-dot.off { background: #ff3b30; }
+
+/* Motion tracking (TrackLayer, TrackingPanel) */
+.trk-layer { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.trk-layer.tool { pointer-events: auto; cursor: crosshair; }
+.trk-layer svg { position: absolute; inset: 0; overflow: visible; }
+.trk-path { fill: none; stroke: #4cd2ff; stroke-width: 1.5; stroke-dasharray: 3 3; opacity: .85; }
+.trk-weak { fill: #ffb020; }
+.trk-lost { fill: #ff4d4d; }
+.trk-box { fill: rgba(76, 210, 255, .08); stroke: #4cd2ff; stroke-width: 2; pointer-events: all; cursor: move; }
+.trk-box.weak { stroke: #ffb020; }
+.trk-box.fixed { stroke: #34c759; fill: rgba(52, 199, 89, .1); }
+.trk-box.drawing { stroke-dasharray: 5 3; pointer-events: none; }
+.trk-handle { fill: #fff; stroke: #4cd2ff; stroke-width: 1.5; pointer-events: all; cursor: nwse-resize; }
+.trk-face { pointer-events: all; cursor: pointer; }
+.trk-face rect { fill: rgba(255, 255, 255, .08); stroke: #ffd60a; stroke-width: 2; }
+.trk-face:hover rect { fill: rgba(255, 214, 10, .2); }
+.trk-face text { fill: #ffd60a; font: 600 13px system-ui, sans-serif; }
+.trk-pt { stroke: #fff; stroke-width: 2; }
+.trk-pt.on { fill: #34c759; }
+.trk-pt.off { fill: #ff3b30; }
+.trk-list { display: flex; flex-direction: column; gap: 4px; }
+.trk-row { display: grid; grid-template-columns: 16px 1fr auto auto; gap: 6px; align-items: center; padding: 3px 6px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+.trk-row.on { border-color: var(--accent, #4cd2ff); background: rgba(76, 210, 255, .08); }
+.trk-name { height: 22px; padding: 0 6px; font-size: 12px; min-width: 0; }
+.trk-sum { font-size: 10.5px; white-space: nowrap; }
+.stk-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.stk { background: var(--panel-2, #222); border: 1px solid var(--border, #333); border-radius: 6px; padding: 4px; cursor: pointer; }
+.stk img { width: 100%; aspect-ratio: 1; object-fit: contain; display: block; }
+.clip-weak { position: absolute; bottom: 0; height: 3px; pointer-events: none; }
+.clip-weak.lost { background: #ff4d4d; }
+.clip-weak.low { background: #ffb020; }

@@ -7,6 +7,7 @@ import { fmtTime, projectDuration } from "../util";
 import { Icon } from "./Icons";
 import TransformHandles from "./TransformHandles";
 import { CutoutPickLayer } from "./CutoutPanel";
+import TrackLayer from "./TrackLayer";
 import TextEditBox from "./TextEditBox";
 import { SafetyBadge, SafetyBoxes } from "./SafeAreas";
 
@@ -92,6 +93,7 @@ function ProgramMonitor() {
   const compare = useEditor((s) => s.compare);
   const colorPick = useEditor((s) => s.colorPick);
   const cutoutPick = useEditor((s) => !!s.cutoutPick);
+  const trackTool = useEditor((s) => s.trackUi.tool !== "none");
   const editingText = useEditor((s) => s.editingText);
   useEffect(() => {
     const e = engineRef.current;
@@ -186,7 +188,8 @@ function ProgramMonitor() {
             {buffering && <span className="preview-label" style={{ top: 8, left: 8 }}>Loading…</span>}
             {shuttleLabel && <span className="shuttle-badge">{shuttleLabel}</span>}
             {compare != null && <CompareDivider value={compare} width={fw} />}
-            {compare == null && !colorPick && !editingText && !cutoutPick && <TransformHandles fw={fw} fh={fh} />}
+            {compare == null && !colorPick && !editingText && !cutoutPick && !trackTool && <TransformHandles fw={fw} fh={fh} />}
+            {compare == null && !colorPick && !editingText && !cutoutPick && <TrackLayer fw={fw} fh={fh} />}
             {cutoutPick && <CutoutPickLayer fw={fw} fh={fh} />}
             {editingText && <TextEditBox fw={fw} />}
             {colorPick && <div className="pv-pick" title="Click a colour to keep" onClick={pick} />}

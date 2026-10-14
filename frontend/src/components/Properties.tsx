@@ -1,4 +1,6 @@
 import CutoutPanel from "./CutoutPanel";
+import FollowPanel from "./FollowPanel";
+import TrackingPanel from "./TrackingPanel";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { toastError, useApp } from "../store/app";
@@ -155,6 +157,10 @@ function ClipProps({ clip, trackId, trackType }: { clip: Clip; trackId: string; 
 
       {isVisual && m && (m.type === "video" || m.type === "image") && <CutoutPanel clip={clip} trackType={trackType} m={m} />}
 
+      {isVisual && m?.type === "video" && <TrackingPanel clip={clip} m={m} />}
+
+      {trackType === "overlay" && m && m.type !== "audio" && <FollowPanel clip={clip} />}
+
       {isVisual && m && m.type !== "audio" && <FiltersPanel clip={clip} trackId={trackId} />}
 
       <div className="prop-group">
@@ -292,6 +298,7 @@ function AdjustmentProps({ clip, trackId }: { clip: Clip; trackId: string }) {
           <div className="faint" style={{ fontSize: 11 }}>Set ◆ keyframes here to fade the grade in or out over time (multiplies the strength).</div>
         </div>
       </div>
+      <FollowPanel clip={clip} />
       <FiltersPanel clip={clip} trackId={trackId} />
       <div className="prop-group">
         <button className="btn danger" onClick={() => st().deleteSelectedClip()}><Icon name="trash" size={14} /> Delete adjustment layer</button>

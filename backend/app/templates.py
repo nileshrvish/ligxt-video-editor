@@ -253,6 +253,22 @@ def from_project(project: Project, name: str, *, category: str = "Beat sync", ta
     dropped: list[int] = []
     slots = []
     id2slot = {}
+    mtracks = {x.get("id"): x for x in (getattr(project, "motionTracks", None) or [])}
+
+    def face_ref(cfg: dict | None, kind: str, label: str) -> dict | None:
+        """Follow / reframe on a tracked face becomes "the main face" of the new media; object tracks can't move to
+        new media (noted)."""
+        if not cfg or not cfg.get("trackId") or cfg.get("enabled") is False:
+            return None
+        tr = mtracks.get(cfg["trackId"])
+        if not tr:
+            return None
+        if tr.get("kind") != "face":
+            if label:
+                notes.append(f"{label} follows a tracked object; templates keep only face tracking, so it stays still in new projects.")
+            return None
+        keep = ("position", "scale", "rotation", "smoothing", "safe") if kind == "follow" else ("third", "smoothing", "vertical")
+        return {"target": "mainFace", **{k: cfg[k] for k in keep if k in cfg}}
     for i, c in enumerate(clips):
         if not c.mediaId:
             continue
@@ -275,7 +291,8 @@ def from_project(project: Project, name: str, *, category: str = "Beat sync", ta
                       "cutout": template_cutout(cd.get("cutout")),
                       # slow motion: a ramp (e.g. "Slow-mo into the drop") and its quality, for video clips
                       "speedRamp": copy.deepcopy(cd.get("speedRamp")) if m.get("type") == "video" else None,
-                      "slowmo": copy.deepcopy(cd.get("slowmo")) if m.get("type") == "video" else None})
+                      "slowmo": copy.deepcopy(cd.get("slowmo")) if m.get("type") == "video" else None,
+                      "reframe": face_ref(cd.get("reframe"), "reframe", f"Shot {i + 1}")})
         id2slot[c.id] = len(slots) - 1
     if dropped:
         notes.append(f"Per-photo colour corrections (shots {', '.join(map(str, dropped))}) are not stored: "
@@ -295,9 +312,10 @@ def from_project(project: Project, name: str, *, category: str = "Beat sync", ta
             if t.type == "overlay":
                 if c.adjustment and not c.mediaId:
                     sb = _snap(B(c.start))
+                    fref = face_ref(cd.get("follow"), "follow", "A tracked region") if cd.get("region") else None
                     layers.append({"track": t.name, "startBeat": sb, "lengthBeats": round(_snap(B(end)) - sb, 4), "filters": cd["filters"],
                                    "opacity": cd["transform"]["opacity"], "keyframes": _kf_to_beats(cd.get("keyframes"), c.start, B),
-                                   "hidden": t.hidden})
+                                   "hidden": t.hidden, "region": copy.deepcopy(cd.get("region")) if fref else None, "follow": fref})
                 elif c.mediaId:
                     notes.append(f"Overlay '{t.name}': media clips on overlay tracks are not part of templates.")
             elif t.type == "text" and c.text:
@@ -311,7 +329,8 @@ def from_project(project: Project, name: str, *, category: str = "Beat sync", ta
                 role = "caption" if words else ("hook" if c.start < 0.2 else "outro" if end >= project_end(project) - 0.2 else "text")
                 texts.append({"key": f"{role}{sum(1 for x in texts if x['role'] == role) + 1}", "role": role, "placeholder": content,
                               "track": t.name, "startBeat": sb, "lengthBeats": round(_snap(B(end), 0.08) - sb, 4), "spec": spec,
-                              "words": words, "transform": cd["transform"], "keyframes": _kf_to_beats(cd.get("keyframes"), c.start, B)})
+                              "words": words, "transform": cd["transform"], "keyframes": _kf_to_beats(cd.get("keyframes"), c.start, B),
+                              "follow": face_ref(cd.get("follow"), "follow", f"Text '{content}'")})
             elif t.type == "audio" and c.mediaId:
                 m = load_meta(c.mediaId) or {}
                 if m.get("sfx"):
@@ -709,6 +728,38 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
         report.append(f"Colour-matched {len(grades)} shots to each other (exposure {min(ev):+.2f} to {max(ev):+.2f} EV, white balance evened out).")
 
     slot_clips = []
+    face_tracks: dict[str, dict | None] = {}  # slot clip id -> its main face's track
+    tracked_faces: dict = {"ok": 0, "none": []}
+
+    def main_face_track(clip, label: str) -> dict | None:
+        """Track the biggest face of a video slot (the template pinned something to "the main face")."""
+        if clip.id in face_tracks:
+            return face_tracks[clip.id]
+        m = metas.get(clip.mediaId) or {}
+        tr = None
+        if m.get("type") == "video":
+            from . import tracking as TR
+            cd = clip.model_dump()
+            D = M.clip_duration(cd)
+            srcs = sorted(M.src_time(cd, tau) for tau in (0.0, max(0.0, D - 1e-3)))
+            for frac in (0.5, 0.25, 0.75, 0.1, 0.9):
+                ts = M.src_time(cd, D * frac)
+                faces = TR.faces_at(m, ts)
+                if faces:
+                    try:
+                        tr = TR.run_track(m, {"method": "face", "seed": {"t": ts, "box": faces[0]["box"]}, "range": srcs,
+                                              "direction": "both", "name": f"Main face ({label})"})["track"]
+                    except ValueError:
+                        tr = None
+                    break
+        face_tracks[clip.id] = tr
+        if tr:
+            p.motionTracks = [*(getattr(p, "motionTracks", None) or []), tr]
+            tracked_faces["ok"] += 1
+        else:
+            tracked_faces["none"].append(label)
+        return tr
+
     muted_videos = 0
     cutout_shots = 0
     slow_shots = 0
@@ -767,6 +818,15 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
         clip = Clip.model_validate(cd)
         main.clips.append(clip)
         slot_clips.append(clip)
+        rf = s.get("reframe")
+        if rf and m["type"] == "video":
+            mw, mh = float(m.get("width") or W), float(m.get("height") or H)
+            if abs(mw / mh - W / H) > 0.1:  # only when the shot doesn't already match the frame
+                ftr = main_face_track(clip, f"slot {i + 1}")
+                if ftr:
+                    clip.fit = "fill"
+                    clip.reframe = {"trackId": ftr["id"], "third": rf.get("third", "center"), "smoothing": rf.get("smoothing", 0.6),
+                                    "vertical": bool(rf.get("vertical"))}
     if slow_shots:
         report.append(f"Slow motion on {slow_shots} video shot(s) as in the template (speed ramps keep their timing; "
                       "AI smooth frames are made on export or when the preview needs them).")
@@ -774,6 +834,8 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
         behind = sum(1 for x in t.get("texts") or [] if (x.get("spec") or {}).get("behindSubject"))
         report.append(f"Cutout on {cutout_shots} shot(s){' with text behind the subject' if behind else ''}: the subjects are analysed "
                       "(AI, cached) when the project opens or exports. Check Properties > Cutout if a shot has no clear person.")
+    if tracked_faces["none"] and any(s.get("reframe") for s in t["slots"]):
+        report.append(f"Auto-reframe on the main face: no face found in {', '.join(tracked_faces['none'])}; those shots are centre-cropped.")
     if muted_videos:
         report.append(f"{muted_videos} video shot(s) play without their own sound so the song carries the edit "
                       f"(select a clip and untick Mute to bring it back).")
@@ -793,6 +855,21 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
             p.tracks.insert(1, tr)
         tr.hidden = bool(L.get("hidden"))
         s0, s1 = T(L["startBeat"]), T(L["startBeat"] + L["lengthBeats"])
+        if L.get("follow") and L.get("region"):
+            # a region on "the main face": one per video shot it covers, each on that shot's face
+            for k, clip in enumerate(slot_clips):
+                c0, c1 = clip.start, clip.start + M.clip_duration(clip.model_dump())
+                a, b = max(s0, c0), min(s1, c1)
+                if b - a < 0.05:
+                    continue
+                ftr = main_face_track(clip, f"slot {k + 1}")
+                if not ftr:
+                    continue
+                fo = {k2: v for k2, v in L["follow"].items() if k2 != "target"}
+                tr.clips.append(Clip.model_validate({"mediaId": None, "adjustment": True, "start": round(a, 4), "inPoint": 0, "outPoint": round(b - a, 4),
+                                                     "filters": copy.deepcopy(L["filters"]), "transform": {"opacity": L.get("opacity", 1)},
+                                                     "region": copy.deepcopy(L["region"]), "follow": {**fo, "trackId": ftr["id"], "clipId": clip.id}}))
+            continue
         tr.clips.append(Clip.model_validate({"mediaId": None, "adjustment": True, "start": round(s0, 4), "inPoint": 0, "outPoint": round(s1 - s0, 4),
                                              "filters": copy.deepcopy(L["filters"]), "transform": {"opacity": L.get("opacity", 1)},
                                              "keyframes": _kf_from_beats(L.get("keyframes"), L["startBeat"], T)}))
@@ -828,13 +905,27 @@ def generate(t: dict, media_ids: list[str], music_id: str, music_start: float, t
                 report.append(f"Text '{content}': {len(toks)} words instead of {len(tw)}; one word per {step:g} beat(s) from the same start.")
                 if wb[-1] >= x["lengthBeats"]:
                     s1 = T(x["startBeat"] + wb[-1] + step)
-        tr2, moved = place_text(spec, x["transform"], faces_during(s0, s1), W, H)
-        if moved:
-            report.append(f"Text '{content}' moved to y={tr2['y']:+.0f} so it doesn't cover a face.")
+        follow = None
+        if x.get("follow"):
+            # pinned to the main face: the face of the video shot under the middle of the text
+            mid_t = (s0 + s1) / 2
+            host = next((c for c in slot_clips if c.start <= mid_t < c.start + M.clip_duration(c.model_dump())), None)
+            ftr = main_face_track(host, f"text '{content}'") if host is not None and metas[host.mediaId]["type"] == "video" else None
+            if ftr:
+                follow = {**{k: v for k, v in x["follow"].items() if k != "target"}, "trackId": ftr["id"], "clipId": host.id}
+                report.append(f"Text '{content}' is pinned to the main face of its shot (tracked).")
+            else:
+                report.append(f"Text '{content}' should follow the main face, but its shot has no face to track (or is a photo): it stays where it is.")
+        if follow:
+            tr2 = copy.deepcopy(x["transform"])  # the offset from the face
+        else:
+            tr2, moved = place_text(spec, x["transform"], faces_during(s0, s1), W, H)
+            if moved:
+                report.append(f"Text '{content}' moved to y={tr2['y']:+.0f} so it doesn't cover a face.")
         track = track_by("text", x.get("track", "Text"))
         track.clips.append(Clip.model_validate({"mediaId": None, "start": round(s0, 4), "inPoint": 0, "outPoint": round(s1 - s0, 4),
                                                 "transform": tr2, "keyframes": _kf_from_beats(x.get("keyframes"), x["startBeat"], T),
-                                                "text": spec}))
+                                                "text": spec, **({"follow": follow} if follow else {})}))
 
     if t.get("sfx"):
         from .media import import_local, SFX_DIR

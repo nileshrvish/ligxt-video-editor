@@ -51,6 +51,41 @@ def kf_expr(kfs, default: float, T: str) -> str:
     return f"if(lt({T},{_f(ks[0]['time'])}),{_f(ks[0]['value'])},{expr})"
 
 
+def lin_expr(ks: list[dict], T: str) -> str:
+    """FFmpeg expression for linear keyframes (held at the ends) as a balanced if-tree, so long
+    tracked paths (hundreds of keys) stay shallow."""
+    if not ks:
+        return "0"
+    if len(ks) == 1:
+        return _f(ks[0]["value"])
+
+    def seg(a: dict, b: dict) -> str:
+        span = b["time"] - a["time"]
+        if span <= 1e-9:
+            return _f(b["value"])
+        return f"({_f(a['value'])}+({_f(b['value'] - a['value'])})*clip(({T}-({_f(a['time'])}))/{_f(span)},0,1))"
+
+    def tree(lo: int, hi: int) -> str:  # keys lo..hi (inclusive), hi - lo >= 1
+        if hi - lo == 1:
+            return seg(ks[lo], ks[hi])
+        mid = (lo + hi) // 2
+        return f"if(lt({T},{_f(ks[mid]['time'])}),{tree(lo, mid)},{tree(mid, hi)})"
+
+    return tree(0, len(ks) - 1)
+
+
+AUTO_TOL = {"x": 0.2, "y": 0.2, "s": 0.0008, "r": 0.04}
+
+
+def auto_keys(am: dict | None) -> dict[str, list[dict]]:
+    """Tracking channels (motion.auto_at) as linear keyframes within a fraction of a pixel."""
+    if not am:
+        return {}
+    from .follow import simplify
+    fps = float(am.get("fps") or 30)
+    return {k: simplify([float(v) for v in am[k]], fps, AUTO_TOL[k]) for k in ("x", "y", "s", "r") if am.get(k)}
+
+
 def gain_expr(c: dict, D: float, tau0: float, base: float, duck: list[tuple[float, float]] | None = None,
               duck_db: float = -12.0, t_abs0: float = 0.0) -> str:
     """Volume expression (volume filter, eval=frame; `t` = time since this audio stream started at
@@ -222,11 +257,14 @@ def motion_layer(g, src: str, c: dict, src_w: int, src_h: int, fill: bool, W: in
     crop = tr.get("crop") or {}
     x0, y0, cw, ch = rect or rounded_rect(src_w, src_h, crop, fill, W, H)
     f = min(W / cw, H / ch)
+    am = c.get("autoMotion") or {}
+    if extent is None and am.get("wholeSource"):  # auto-reframe pans across the whole frame, not just the fill crop
+        extent = (0, 0, src_w, src_h)
     ex0, ey0, ew, eh = extent or (x0, y0, cw, ch)
     ox, oy, isx, isy = img_map or (0.0, 0.0, 1.0, 1.0)
     ix0, iy0 = rnd((ex0 - ox) * isx), rnd((ey0 - oy) * isy)
     icw, ich = max(2, rnd(ew * isx)), max(2, rnd(eh * isy))
-    dens = min(1.0, f * max_scale(c) / min(isx, isy))
+    dens = min(1.0, f * max_scale(c) * max([1.0] + list(am.get("s") or [])) / min(isx, isy))
     ww, wh = max(2, rnd(icw * dens)), max(2, rnd(ich * dens))
     kx, ky = ww / icw, wh / ich
     Wp, Hp = max(ww + 2 * PAD, W), max(wh + 2 * PAD, H)
@@ -236,6 +274,15 @@ def motion_layer(g, src: str, c: dict, src_w: int, src_h: int, fill: bool, W: in
     Y = f"({kf_expr(kf.get('y'), float(tr.get('y', 0)), T)})+({kf_expr(kf.get('shakeY'), 0.0, T)})"
     S = f"({kf_expr(kf.get('scale'), float(tr.get('scale', 1)), T)})*({kf_expr(kf.get('punch'), 1.0, T)})"
     R = f"({kf_expr(kf.get('rotation'), float(tr.get('rotation', 0)), T)})+({kf_expr(kf.get('shakeR'), 0.0, T)})"
+    ak = auto_keys(am)
+    if ak.get("x"):
+        X += f"+({lin_expr(ak['x'], T)})"
+    if ak.get("y"):
+        Y += f"+({lin_expr(ak['y'], T)})"
+    if ak.get("s"):
+        S += f"*({lin_expr(ak['s'], T)})"
+    if ak.get("r"):
+        R += f"+({lin_expr(ak['r'], T)})"
     fx = -1 if tr.get("flipH") else 1
     fy = -1 if tr.get("flipV") else 1
     cx, cy = x0 + cw / 2, y0 + ch / 2

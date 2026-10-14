@@ -22,6 +22,10 @@ import { cutoutOn, glowLevels, normalizeCutout, pulseAt, timelineBeats, type Cut
 import { CutoutRenderer } from "./cutout";
 import { onSlowAssets, slowAsset, type SlowInfo } from "../slowmo/assets";
 import { needsRetime } from "../slowmo/model";
+import { resolve as resolveTracking, regionAt } from "../tracking/follow";
+import { autoMotionOf, autoRegionOf, setResolved } from "../tracking/registry";
+import { drawRegion } from "./regions";
+import { refScale } from "../grade/math";
 
 const PREROLL = 1.5; // seconds: load + seek upcoming clips ahead of time
 const KEEP_IDLE_MS = 4000; // drop elements unused for this long
@@ -494,7 +498,46 @@ export class PreviewEngine {
 
   // ------------------------------------------------------------ drawing
   /** Draw the frame at time t. Returns false if a layer wasn't ready (the old frame is kept). */
+  private trackingFor: { project: Project | null; media: Record<string, MediaMeta> | null; sig: string } = { project: null, media: null, sig: "" };
+
+  /** Resolve follow / reframe / tracked regions (tracking/follow.ts, the export's follow.py) for this project. */
+  private tracking(p: Project) {
+    const media = useEditor.getState().media;
+    const needs = (p.motionTracks?.length ?? 0) > 0;
+    // safe-area clamping needs the text sizes, which arrive with the text layouts
+    const sig = needs ? p.tracks.flatMap((t) => t.clips).filter((c) => c.follow?.safe && c.text)
+      .map((c) => (textAssetFor(c.id, c.text)?.layout ? "1" : "0")).join("") : "";
+    const tf = this.trackingFor;
+    if (tf.project === p && tf.media === media && tf.sig === sig) return;
+    this.trackingFor = { project: p, media, sig };
+    if (!needs) {
+      setResolved(new Map());
+      return;
+    }
+    const fps = p.settings.fps || 30;
+    const { width: W, height: H } = p.settings;
+    const itemSize = (c: Clip): [number, number] | null => {
+      if (c.text) {
+        const lay = textAssetFor(c.id, c.text)?.layout;
+        return lay ? [lay.w, lay.h] : null;
+      }
+      const m = c.mediaId ? media[c.mediaId] : undefined;
+      if (!m) return null;
+      const [x0, y0, cw, ch] = roundedRect(m.width || W, m.height || H, c.transform?.crop, (c.fit ?? "fit") === "fill", W, H);
+      void x0; void y0;
+      const f = Math.min(W / cw, H / ch);
+      return [cw * f, ch * f];
+    };
+    try {
+      setResolved(resolveTracking(p, media, fps, itemSize, (c, m) => needsRetime(c, m, fps)));
+    } catch (e) {
+      console.warn("[ligxt] tracking", e);
+      setResolved(new Map());
+    }
+  }
+
   private draw(p: Project, active: Active[], t: number): boolean {
+    this.tracking(p);
     const trA = active.find((a) => a.visual && a.isMain && a.tr?.side === "A");
     const trB = active.find((a) => a.visual && a.isMain && a.tr?.side === "B" && a.tr.plan === trA?.tr?.plan);
     const inTransition = !!(trA && trB);
@@ -666,6 +709,16 @@ export class PreviewEngine {
     for (let j = 0; j < layers.length; j++) {
       const a = layers[j];
       if (f.inTransition && (a === f.trA || a === f.trB)) continue;
+      if (a.adjust && a.clip.region) {
+        // a tracked region: blur / pixelate / grade inside the moving mask (export: track_render.py)
+        const rg = autoRegionOf(a.clip.id);
+        if (bypass || !rg) continue;
+        const box = regionAt(rg, t - a.clip.start);
+        const ok = drawRegion(ctx, target, a.clip.region, box, k, refScale(W, H),
+          (cv) => this.fx.apply(cv, a.clip.filters, this.gradeCtx(p, t, W, H)));
+        if (!ok) return false;
+        continue;
+      }
       if (a.adjust) {
         if (bypass || !needsGrade(a.clip.filters)) continue;
         const c2 = sized(this.layerAdj, cw, ch);
@@ -1025,6 +1078,8 @@ export class PreviewEngine {
       const { fx, fy } = ext.info!;
       ctx.drawImage(ext.img!, 0, 0, ext.img!.naturalWidth, ext.img!.naturalHeight, -fx * sw, -fy * sh, sw * (1 + 2 * fx), sh * (1 + 2 * fy));
       ctx.drawImage(src, 0, 0, sw, sh, 0, 0, sw, sh);
+    } else if (autoMotionOf(a.clip)?.wholeSource) {
+      ctx.drawImage(src, 0, 0, sw, sh, 0, 0, sw, sh); // auto-reframe pans across the whole frame
     } else {
       ctx.drawImage(src, x0, y0, rw, rh, x0, y0, rw, rh);
     }

@@ -12,6 +12,7 @@ import { clipDuration } from "../util";
 import { Icon } from "./Icons";
 import { PropSlider, useClipTime, useClipUpdate } from "./MotionPanel";
 import { SafetyNote } from "./SafeAreas";
+import FollowPanel from "./FollowPanel";
 
 type Patch = Partial<TextSpec> | Record<string, unknown>;
 
@@ -238,6 +239,8 @@ export default function TextPanel({ clip }: { clip: Clip }) {
         <PropSlider clip={clip} prop="rotation" label="Rotate" tau={tau} update={update} min={-180} max={180} step={0.5} fmt={(v) => `${v.toFixed(1)}°`} />
         <PropSlider clip={clip} prop="opacity" label="Opacity" tau={tau} update={update} min={0} max={100} step={1} scale={100} fmt={(v) => `${Math.round(v * 100)}%`} />
       </div>
+
+      <FollowPanel clip={clip} />
 
       <div className="prop-group">
         <div className="prop-row">

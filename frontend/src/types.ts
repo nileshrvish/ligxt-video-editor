@@ -46,6 +46,14 @@ export interface Clip {
   cutout?: import("./cutout/model").Cutout | null;
   /** Slow-mo quality (frame repeat / blending / AI smooth) and frame-rate smoothing; see slowmo/model.ts. */
   slowmo?: import("./slowmo/model").SlowMo | null;
+  /** Follow a tracked face/object (text, stickers, overlay clips, tracked regions); see tracking/follow.ts. */
+  follow?: import("./tracking/types").Follow | null;
+  /** Auto-reframe a video clip onto a tracked subject. */
+  reframe?: import("./tracking/types").Reframe | null;
+  /** Adjustment clips: a tracked blur / pixelate / grade region instead of the whole frame. */
+  region?: import("./tracking/types").Region | null;
+  /** Resolved tracking channels (computed, never saved by the editor). */
+  autoMotion?: import("./tracking/types").AutoMotion | null;
   [extra: string]: unknown;
 }
 
@@ -89,6 +97,8 @@ export interface Project {
   transitions: Transition[];
   markers: Marker[];
   export: ExportSettings;
+  /** Tracked faces/objects (source frames of a media file); see tracking/follow.ts. */
+  motionTracks?: import("./tracking/types").MotionTrack[];
   [extra: string]: unknown;
 }
 

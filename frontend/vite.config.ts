@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
@@ -22,4 +23,6 @@ export default defineConfig({
     },
   },
   build: { outDir: "dist", emptyOutDir: true, chunkSizeWarningLimit: 1200 },
+  // e2e/ holds the Playwright UI tests (npm run e2e), not vitest unit tests
+  test: { exclude: ["e2e/**", "node_modules/**", "dist/**"] },
 });

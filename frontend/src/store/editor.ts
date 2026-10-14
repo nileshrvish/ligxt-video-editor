@@ -24,6 +24,20 @@ export type Selection =
   | { kind: "marker"; id: string }
   | { kind: "transition"; id: string };
 
+export interface TrackUi {
+  clipId: string | null;
+  trackId: string | null;
+  tool: "none" | "draw" | "face" | "click";
+  /** Faces found on the frame at the playhead (pick one to follow). */
+  faces: { box: [number, number, number, number]; score: number }[] | null;
+  /** A box the user dragged on the current frame to fix the track ("Re-track from here"). */
+  fix: { t: number; box: [number, number, number, number] } | null;
+  /** AI tracker: clicks on the object (fractions of the source). */
+  points: { x: number; y: number; label: 0 | 1 }[];
+  /** Which way to track from the playhead. */
+  dir?: "both" | "forward" | "backward";
+}
+
 export interface Upload {
   key: string;
   name: string;
@@ -88,6 +102,10 @@ interface EditorState {
   /** Click-to-select (cutout object mode): the clip being picked on the preview and the clicks so far. */
   cutoutPick: { clipId: string; points: PickPoint[] } | null;
   setCutoutPick: (v: { clipId: string; points: PickPoint[] } | null) => void;
+  /** Motion tracking on the preview: which track is shown, and the current tool (draw a box, pick a face,
+   *  click the object for the AI tracker, or a box being fixed). Boxes are fractions of the source frame. */
+  trackUi: TrackUi;
+  setTrackUi: (v: Partial<TrackUi>) => void;
   setColorPick: (fn: ((rgb: [number, number, number]) => void) | null) => void;
   /** Add a bundled sound effect with its peak on each of `times` (imports it once). */
   addSfx: (sfxId: string, times: number[], volume?: number) => Promise<number>;
@@ -160,6 +178,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   setColorPick: (colorPick) => set({ colorPick }),
   cutoutPick: null,
   setCutoutPick: (cutoutPick) => set({ cutoutPick }),
+  trackUi: { clipId: null, trackId: null, tool: "none", faces: null, fix: null, points: [] },
+  setTrackUi: (v) => set({ trackUi: { ...get().trackUi, ...v } }),
   editingText: null,
   setEditingText: (editingText) => set({ editingText }),
 

@@ -1,6 +1,8 @@
 // Keyframes, easing, layer transforms, speed/time mapping and ducking: a port of backend/app/motion.py
 // (checked against shared/motion_cases.json). Keyframe times are seconds from the clip's start.
 import type { Clip, Keyframe } from "../types";
+import { autoMotionOf } from "../tracking/registry";
+import type { AutoMotion } from "../tracking/types";
 
 export const EASINGS = ["linear", "in", "out", "inout", "punch"] as const;
 export type Easing = (typeof EASINGS)[number];
@@ -43,14 +45,28 @@ export function valueAt(kfs: Keyframe[] | undefined, t: number, dflt: number): n
 
 export interface TransformValues { x: number; y: number; scale: number; rotation: number; opacity: number; flipH: boolean; flipV: boolean }
 
+/** Motion-tracking channels (tracking/follow.ts) at clip time tau: linear between samples, held at the ends. */
+export function autoAt(am: AutoMotion | null, tau: number): { x: number; y: number; s: number; r: number } | null {
+  if (!am) return null;
+  const fps = am.fps || 30;
+  const ch = (arr: number[] | null | undefined, dflt: number) => {
+    if (!arr || !arr.length) return dflt;
+    const f = Math.min(Math.max(0, tau * fps), arr.length - 1);
+    const i = Math.floor(f), j = Math.min(i + 1, arr.length - 1);
+    return arr[i] + (arr[j] - arr[i]) * (f - i);
+  };
+  return { x: ch(am.x, 0), y: ch(am.y, 0), s: ch(am.s, 1), r: ch(am.r, 0) };
+}
+
 export function transformAt(c: Clip, tau: number): TransformValues {
   const tr = c.transform;
   const kf = c.keyframes ?? {};
+  const au = autoAt(autoMotionOf(c), tau) ?? { x: 0, y: 0, s: 1, r: 0 };
   return {
-    x: valueAt(kf.x, tau, tr?.x ?? 0) + valueAt(kf.shakeX, tau, 0),
-    y: valueAt(kf.y, tau, tr?.y ?? 0) + valueAt(kf.shakeY, tau, 0),
-    scale: valueAt(kf.scale, tau, tr?.scale ?? 1) * valueAt(kf.punch, tau, 1),
-    rotation: valueAt(kf.rotation, tau, tr?.rotation ?? 0) + valueAt(kf.shakeR, tau, 0),
+    x: valueAt(kf.x, tau, tr?.x ?? 0) + valueAt(kf.shakeX, tau, 0) + au.x,
+    y: valueAt(kf.y, tau, tr?.y ?? 0) + valueAt(kf.shakeY, tau, 0) + au.y,
+    scale: valueAt(kf.scale, tau, tr?.scale ?? 1) * valueAt(kf.punch, tau, 1) * au.s,
+    rotation: valueAt(kf.rotation, tau, tr?.rotation ?? 0) + valueAt(kf.shakeR, tau, 0) + au.r,
     opacity: valueAt(kf.opacity, tau, tr?.opacity ?? 1),
     flipH: !!tr?.flipH, flipV: !!tr?.flipV,
   };
@@ -60,7 +76,7 @@ export function hasMotion(c: Clip): boolean {
   const tr = c.transform;
   const kf = c.keyframes ?? {};
   const crop = tr?.crop ?? { left: 0, top: 0, right: 0, bottom: 0 };
-  return ANIMATED.some((p) => (kf[p]?.length ?? 0) > 0)
+  return ANIMATED.some((p) => (kf[p]?.length ?? 0) > 0) || !!autoMotionOf(c)
     || Math.abs(tr?.x ?? 0) > 1e-6 || Math.abs(tr?.y ?? 0) > 1e-6 || Math.abs((tr?.scale ?? 1) - 1) > 1e-6
     || Math.abs(tr?.rotation ?? 0) > 1e-6 || (tr?.opacity ?? 1) < 1 - 1e-6 || !!tr?.flipH || !!tr?.flipV
     || crop.left > 1e-6 || crop.top > 1e-6 || crop.right > 1e-6 || crop.bottom > 1e-6;

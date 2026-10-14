@@ -1,0 +1,36 @@
+{
+ "stickers": [
+  {
+   "id": "pin",
+   "name": "Map pin"
+  },
+  {
+   "id": "heart",
+   "name": "Heart"
+  },
+  {
+   "id": "star",
+   "name": "Star"
+  },
+  {
+   "id": "sparkle",
+   "name": "Sparkle"
+  },
+  {
+   "id": "arrow",
+   "name": "Arrow (points down)"
+  },
+  {
+   "id": "ring",
+   "name": "Highlight ring"
+  },
+  {
+   "id": "flame",
+   "name": "Flame"
+  },
+  {
+   "id": "cool",
+   "name": "Cool face (sunglasses)"
+  }
+ ]
+}

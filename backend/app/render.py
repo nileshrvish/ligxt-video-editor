@@ -33,6 +33,7 @@ from . import slowmo as SM
 from . import layers as LY
 from . import motion as MO
 from . import text as TX
+from .track_render import region_layer, resolve_tracking
 from .config import ROOT
 
 EXPORT_PRESETS = {p["id"]: p for p in json.loads((ROOT / "shared" / "export_presets.json").read_text(encoding="utf-8"))["presets"]}
@@ -272,6 +273,13 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         fps = (first_video or {}).get("fps") or s.fps or 30
     fps = float(fps)
 
+    # ---- motion tracking (follow.py): reframed clips, things that follow a track, tracked regions
+    auto = resolve_tracking(project, metas, fps, W, H)
+    for t in project.tracks:
+        for c in t.clips:
+            for k, v in (auto.get(c.id) or {}).items():
+                setattr(c, k, v)
+
     total = max(c.start + clip_duration(c) for c in clips)
     r0 = max(0.0, range_start or 0.0)
     r1 = min(total, range_end) if range_end and range_end > 0 else total
@@ -401,6 +409,10 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
         m = metas[c.mediaId]
         cd = c.model_dump()
         seg = nf / fps
+        # Sample on the output frame grid: a piece that starts between frames (a transition centred on a cut
+        # that isn't on a frame) would otherwise show its frames up to half a frame early, repeating a frame
+        # where the source runs at the timeline's rate.
+        t_from = frame_of(t_from) / fps + r0
         tau0 = t_from - c.start
         D = clip_duration(c)
         hdr = TONEMAP + "," if m.get("hdr") else ""
@@ -574,6 +586,7 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
     v_base = "vcat"
     extra: list[str] = []
     text_n = 0
+    region_n = 0
     for t in project.tracks:
         if t.hidden or t.type not in ("overlay", "text"):
             continue
@@ -619,6 +632,18 @@ def build_plan(project: Project, out_path: Path, *, mode: str = "final",
                 g.add(f"[{v_base}][{ov}]overlay={prep['x']}:{prep['y']}:enable='between(t,{_f(offset - OFFSET_EPS)},{_f(offset + nf / fps - OFFSET_EPS)})':"
                       f"eof_action=pass:format=auto[{out}]")
                 v_base = out
+                continue
+            if c.adjustment and not c.mediaId and getattr(c, "region", None):
+                a_t, b_t = max(c.start, r0), min(c.start + clip_duration(c), r1)
+                rg = getattr(c, "autoRegion", None)
+                nf = frame_of(b_t) - frame_of(a_t)
+                if b_t - a_t <= EPS or nf <= 0 or not rg:
+                    continue
+                v_base = region_layer(g, v_base, c, rg, a_t, nf, frame_of(a_t), fps, W, H, rs, plan_tasks,
+                                      lambda src: grade_chain(g, src, filt(c), W, H, rs=rs, fps=fps, t0=r0, f0=int(round(r0 * fps)),
+                                                              duration=dur, workdir=workdir, cubes=cubes),
+                                      region_n)
+                region_n += 1
                 continue
             if c.adjustment and not c.mediaId:
                 a_t, b_t = max(c.start, r0), min(c.start + clip_duration(c), r1)

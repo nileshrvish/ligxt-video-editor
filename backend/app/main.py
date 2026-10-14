@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai_models, captions, config, cutout, luts, media, presets_api, projects, render, slowmo, system_api, templates_api, text_api
+from . import ai_models, captions, config, cutout, luts, media, presets_api, projects, render, slowmo, system_api, templates_api, text_api, tracking
 from .ffmpeg_utils import ffmpeg_version, has_nvenc
 from .jobs import jobs
 
@@ -51,6 +51,7 @@ app.include_router(system_api.router)
 app.include_router(ai_models.router)
 app.include_router(cutout.router)
 app.include_router(slowmo.router)
+app.include_router(tracking.router)
 
 
 @app.exception_handler(Exception)
@@ -144,6 +145,7 @@ app.mount("/files/exports", StaticFiles(directory=config.EXPORTS_DIR), name="exp
 app.mount("/files/projects", StaticFiles(directory=config.PROJECTS_DIR), name="project-files")
 app.mount("/files/templates", StaticFiles(directory=config.TEMPLATES_DIR), name="template-files")
 app.mount("/files/fonts", StaticFiles(directory=config.ROOT / "fonts"), name="font-files")
+app.mount("/files/stickers", StaticFiles(directory=config.ROOT / "stickers"), name="sticker-files")
 (config.ROOT / "templates_builtin").mkdir(exist_ok=True)
 app.mount("/files/templates_builtin", StaticFiles(directory=config.ROOT / "templates_builtin"), name="builtin-template-files")
 

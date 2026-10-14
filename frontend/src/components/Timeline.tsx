@@ -1,4 +1,5 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { srcTime } from "../motion/motion";
 import { useApp } from "../store/app";
 import { useEditor } from "../store/editor";
 import * as ops from "../timeline/ops";
@@ -12,6 +13,7 @@ import { TEXT_PRESETS } from "../text/anim";
 import CaptionsDialog from "./CaptionsDialog";
 import * as E from "../motion/edit";
 import { api } from "../api";
+import { weakRanges } from "../tracking/edit";
 
 const TRACK_ICONS: Record<string, string> = { video: "film", overlay: "layout", text: "text", audio: "volume", music: "music" };
 const SNAP_PX = 8;
@@ -656,6 +658,7 @@ const ClipBlock = memo(function ClipBlock({
       {c.filters?.length > 0 && !c.adjustment && <span className="fx-dot" title={`${c.filters.length} filter(s)`}>fx</span>}
       {speedBadge(c) && <span className="fx-dot" style={{ right: c.filters?.length && !c.adjustment ? 22 : 4, color: "#9fe3ff" }}>{speedBadge(c)}</span>}
       {!track.locked && w > 20 && <KeyDiamonds c={c} pps={pps} />}
+      {visual && m?.type === "video" && <WeakMarks c={c} pps={pps} />}
       {showWave && m && <Waveform m={m} c={c} width={w} muted={c.muted || track.muted} />}
       {m?.beats && (track.type === "audio" || track.type === "music") && pps * (60 / (m.bpm || 120)) >= 4 &&
         ops.clipBeats(c, m.beats).map((b) => <div key={b} className="beat" style={{ left: (b - c.start) * pps }} />)}
@@ -670,6 +673,26 @@ const ClipBlock = memo(function ClipBlock({
   );
 });
 
+
+/** Motion tracking: where a track used in the edit (or shown in the panel) is uncertain (orange) or lost (red). */
+function WeakMarks({ c, pps }: { c: Clip; pps: number }) {
+  const tracks = useEditor((s) => s.project?.motionTracks);
+  const shown = useEditor((s) => s.trackUi.trackId);
+  const used = useEditor((s) => s.project?.tracks.flatMap((t) => t.clips).map((x) => x.follow?.trackId ?? x.reframe?.trackId ?? "").join("|") ?? "");
+  const fps = useEditor((s) => s.project?.settings.fps ?? 30);
+  const ranges = useMemo(() => {
+    const mine = (tracks ?? []).filter((t) => t.mediaId === c.mediaId && (t.id === shown || used.split("|").includes(t.id)));
+    return mine.flatMap((t) => weakRanges(t, c, (tau) => srcTime(c, tau).src, Math.min(fps, 30)));
+  }, [tracks, shown, used, c, fps]);
+  return (
+    <>
+      {ranges.map((r, i) => (
+        <div key={i} className={`clip-weak ${r.lost ? "lost" : "low"}`} style={{ left: (r.from - c.start) * pps, width: Math.max(2, (r.to - r.from) * pps) }}
+          title={r.lost ? "Tracking lost here" : "Tracking uncertain here"} />
+      ))}
+    </>
+  );
+}
 
 function Waveform({ m, c, width, muted }: { m: MediaMeta; c: Clip; width: number; muted: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);

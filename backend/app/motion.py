@@ -53,14 +53,34 @@ def _tr(c: dict) -> dict:
     return c.get("transform") or {}
 
 
+def auto_at(am: dict | None, tau: float) -> dict | None:
+    """Motion-tracking channels (follow.py `autoMotion`) at clip time tau: linear between the samples
+    (taken at tau = i / fps), held at the ends. x/y add, s multiplies the scale, r adds degrees."""
+    if not am:
+        return None
+    fps = float(am.get("fps") or 30)
+    out = {}
+    for k, dflt in (("x", 0.0), ("y", 0.0), ("s", 1.0), ("r", 0.0)):
+        arr = am.get(k)
+        if not arr:
+            out[k] = dflt
+            continue
+        f = min(max(0.0, tau * fps), len(arr) - 1)
+        i = int(math.floor(f))
+        j = min(i + 1, len(arr) - 1)
+        out[k] = arr[i] + (arr[j] - arr[i]) * (f - i)
+    return out
+
+
 def transform_at(c: dict, tau: float) -> dict:
     tr = _tr(c)
     kf = c.get("keyframes") or {}
+    au = auto_at(c.get("autoMotion"), tau) or {"x": 0.0, "y": 0.0, "s": 1.0, "r": 0.0}
     return {
-        "x": value_at(kf.get("x"), tau, float(tr.get("x", 0))) + value_at(kf.get("shakeX"), tau, 0.0),
-        "y": value_at(kf.get("y"), tau, float(tr.get("y", 0))) + value_at(kf.get("shakeY"), tau, 0.0),
-        "scale": value_at(kf.get("scale"), tau, float(tr.get("scale", 1))) * value_at(kf.get("punch"), tau, 1.0),
-        "rotation": value_at(kf.get("rotation"), tau, float(tr.get("rotation", 0))) + value_at(kf.get("shakeR"), tau, 0.0),
+        "x": value_at(kf.get("x"), tau, float(tr.get("x", 0))) + value_at(kf.get("shakeX"), tau, 0.0) + au["x"],
+        "y": value_at(kf.get("y"), tau, float(tr.get("y", 0))) + value_at(kf.get("shakeY"), tau, 0.0) + au["y"],
+        "scale": value_at(kf.get("scale"), tau, float(tr.get("scale", 1))) * value_at(kf.get("punch"), tau, 1.0) * au["s"],
+        "rotation": value_at(kf.get("rotation"), tau, float(tr.get("rotation", 0))) + value_at(kf.get("shakeR"), tau, 0.0) + au["r"],
         "opacity": value_at(kf.get("opacity"), tau, float(tr.get("opacity", 1))),
         "flipH": bool(tr.get("flipH")), "flipV": bool(tr.get("flipV")),
     }
@@ -71,7 +91,7 @@ def has_motion(c: dict) -> bool:
     tr = _tr(c)
     kf = c.get("keyframes") or {}
     crop = tr.get("crop") or {}
-    return (any(kf.get(p) for p in ANIMATED)
+    return (any(kf.get(p) for p in ANIMATED) or bool(c.get("autoMotion"))
             or abs(float(tr.get("x", 0))) > 1e-6 or abs(float(tr.get("y", 0))) > 1e-6
             or abs(float(tr.get("scale", 1)) - 1) > 1e-6 or abs(float(tr.get("rotation", 0))) > 1e-6
             or float(tr.get("opacity", 1)) < 1 - 1e-6 or bool(tr.get("flipH")) or bool(tr.get("flipV"))

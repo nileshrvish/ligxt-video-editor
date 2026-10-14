@@ -173,6 +173,13 @@ def make_proxy(meta: dict, ctx: JobContext, p0: float, p1: float) -> tuple[str |
         ctx.progress(p0 + (p1 - p0) * p)
 
     if meta["type"] == "image":
+        pf = str(meta.get("pixFmt") or "")
+        if src.lower().endswith((".png", ".webp")) and ("a" in pf.replace("pal", "") or pf.startswith("pal")):
+            # transparent pictures (stickers, logos): keep the alpha in the preview
+            out = cdir / "preview.png"
+            _ffmpeg_quick(["-i", src, "-frames:v", "1", "-vf",
+                           "scale=1920:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,format=rgba", str(out)])
+            return f"/files/cache/{mid}/preview.png", "ready"
         out = cdir / "preview.jpg"
         _ffmpeg_quick(["-i", src, "-frames:v", "1", "-vf",
                        "scale=1920:1920:force_original_aspect_ratio=decrease:force_divisible_by=2",
@@ -424,6 +431,37 @@ def sfx_import(sid: str):
             "size": dest.stat().st_size, "imported": time.time(), **probe(str(dest)),
             "thumbnail": None, "waveform": None, "proxy": None, "proxyStatus": "none", "status": "processing",
             "error": None, "sfx": sid, "sfxPeak": float(info.get("peak", 0.0))}
+    save_meta(meta)
+    job = queue_processing(meta)
+    return {"media": meta, "jobId": job.id}
+
+
+STICKER_DIR = config.ROOT / "stickers"
+
+
+@router.get("/stickers/library")
+def sticker_library():
+    side = STICKER_DIR / "stickers.json"
+    items = json.loads(side.read_text(encoding="utf-8"))["stickers"] if side.exists() else []
+    return {"stickers": [{**it, "url": f"/files/stickers/{it['id']}.png"} for it in items if (STICKER_DIR / f"{it['id']}.png").exists()]}
+
+
+@router.post("/stickers/{sid}/import")
+def sticker_import(sid: str):
+    """Add a bundled sticker (transparent PNG, CC0) to the media library as a normal photo."""
+    if not re.fullmatch(r"[a-z0-9-]{1,40}", sid) or not (STICKER_DIR / f"{sid}.png").exists():
+        raise HTTPException(404, "Unknown sticker.")
+    side = STICKER_DIR / "stickers.json"
+    names = {it["id"]: it["name"] for it in (json.loads(side.read_text(encoding="utf-8"))["stickers"] if side.exists() else [])}
+    mid = uuid.uuid4().hex[:12]
+    d = media_dir(mid)
+    d.mkdir(parents=True)
+    dest = d / "original.png"
+    shutil.copyfile(STICKER_DIR / f"{sid}.png", dest)
+    meta = {"id": mid, "name": f"Sticker {names.get(sid, sid)}.png", "type": "image", "file": f"media/{mid}/original.png",
+            "size": dest.stat().st_size, "imported": time.time(), **probe(str(dest)),
+            "thumbnail": None, "waveform": None, "proxy": None, "proxyStatus": "none", "status": "processing",
+            "error": None, "sticker": sid}
     save_meta(meta)
     job = queue_processing(meta)
     return {"media": meta, "jobId": job.id}

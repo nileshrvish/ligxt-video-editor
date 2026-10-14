@@ -135,7 +135,12 @@ def op_interp(ctx: Ctx, args: dict) -> dict:
     return interp(ctx, args)
 
 
-OPS = {"probe": op_probe, "matte": op_matte, "segment": op_segment, "interp": op_interp}
+def op_track(ctx: Ctx, args: dict) -> dict:
+    from track_sam import track
+    return track(ctx, args)
+
+
+OPS = {"probe": op_probe, "matte": op_matte, "segment": op_segment, "interp": op_interp, "track": op_track}
 
 
 def main() -> None:
