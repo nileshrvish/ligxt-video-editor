@@ -101,6 +101,12 @@ def unload() -> None:
     la = sys.modules.get("lyrics_align")
     if la is not None:
         la.unload()
+    sp = sys.modules.get("separate")
+    if sp is not None:
+        sp.unload()
+    tr = sys.modules.get("translate")
+    if tr is not None:
+        tr.unload()
     try:
         import torch
         if torch.cuda.is_available():

@@ -117,18 +117,61 @@ export function addCaptions(p: Project, words: TimedWord[], style: Partial<TextS
   return { trackId, ids };
 }
 
+export type LyricsLayout = "original" | "translation" | "two";
+export interface LyricsTranslation { lines: string[]; from: string; to: string; model: string; script?: "native" | "roman" }
+export const TRANSLATION_SCALE = 0.62; // the second (translated) line's size against the lyrics
+
+/** Line timing: from the first word to the last word + 0.25 s, never past the next line, at least 0.3 s. */
+export function lineTimes(lines: TimedWord[][]): { start: number; end: number }[] {
+  return lines.map((seg, i) => {
+    const start = seg[0].start;
+    const next = lines[i + 1]?.[0].start ?? Infinity;
+    return { start, end: Math.max(start + 0.3, Math.min(seg[seg.length - 1].end + 0.25, next)) };
+  });
+}
+
+/** Where the translated line sits in the two-line layout: just below the lyrics line. */
+export function translationPosition(style: Partial<TextSpec>, position: { x: number; y: number }): { x: number; y: number } {
+  const size = Number(style.size ?? 72);
+  const lh = Number(style.lineHeight ?? 1.1);
+  return { x: position.x, y: Math.round(position.y + size * lh * 0.5 + size * TRANSLATION_SCALE * lh * 0.5 + size * 0.18) };
+}
+
 /** Song lyrics: one caption clip per line (timeline seconds) on a new "Lyrics" track, in the caption `words` format,
- *  so every highlight style works. Lines from Auto mode are grouped with segmentWords first. Returns the clip ids. */
-export function addLyrics(p: Project, lines: TimedWord[][], style: Partial<TextSpec>, position: { x: number; y: number }): { trackId: string; ids: string[] } {
+ *  so every highlight style works. Lines from Auto mode are grouped with segmentWords first.
+ *  With a translation (Phase 13b): layout "translation" puts the translated lines on the Lyrics track instead, "two"
+ *  adds them on a "Lyrics (translation)" track below the lyrics, smaller. Translated clips use the line's timing (no
+ *  word timings: they fade in as a whole line) and remember their source line, so one line can be re-translated.
+ *  Returns the lyrics track and every clip id. */
+export function addLyrics(p: Project, lines: TimedWord[][], style: Partial<TextSpec>, position: { x: number; y: number },
+  tr?: LyricsTranslation | null, layout: LyricsLayout = "original"): { trackId: string; ids: string[]; translationTrackId?: string } {
+  const clean = lines.map((l) => l.map((w) => ({ ...w, text: w.text.trim() })).filter((w) => w.text)).filter((l) => l.length);
+  const keep = lines.map((l) => l.some((w) => w.text.trim()));  // translations follow the original lines (empty ones dropped)
+  const trLines = tr ? tr.lines.filter((_, i) => keep[i] !== false) : [];
+  const times = lineTimes(clean);
+  const mode: LyricsLayout = tr ? layout : "original";
   const trackId = addTrack(p, "text");
   const track = p.tracks.find((t) => t.id === trackId)!;
   track.name = "Lyrics";
-  const clean = lines.map((l) => l.map((w) => ({ ...w, text: w.text.trim() })).filter((w) => w.text)).filter((l) => l.length);
   const ids: string[] = [];
+  const translated = (i: number, st: Partial<TextSpec>, pos: { x: number; y: number }) => {
+    const { start, end } = times[i];
+    const spec: Partial<TextSpec> & { translation?: object } = {
+      ...deepClone(st), content: trLines[i] ?? "",
+      highlight: { ...(st.highlight ?? {}), style: "none" } as TextSpec["highlight"],
+      animIn: { type: "fade", duration: 0.2, easing: "out" }, animOut: { type: "fade", duration: 0.15, easing: "in" },
+      translation: { source: clean[i].map((w) => w.text).join(" "), from: tr!.from, to: tr!.to, model: tr!.model, script: tr!.script ?? "native" },
+    };
+    return newTextClip(+start.toFixed(3), +(end - start).toFixed(3), spec as Partial<TextSpec>, pos);
+  };
   clean.forEach((seg, i) => {
-    const start = seg[0].start;
-    const next = clean[i + 1]?.[0].start ?? Infinity;
-    const end = Math.max(start + 0.3, Math.min(seg[seg.length - 1].end + 0.25, next));
+    const { start, end } = times[i];
+    if (mode === "translation") {
+      const c = translated(i, style, position);
+      track.clips.push(c);
+      ids.push(c.id);
+      return;
+    }
     const spec: Partial<TextSpec> = {
       ...deepClone(style), content: seg.map((w) => w.text).join(" "),
       words: seg.map((w) => ({ text: w.text, start: +(w.start - start).toFixed(3), end: +(w.end - start).toFixed(3) })),
@@ -138,7 +181,20 @@ export function addLyrics(p: Project, lines: TimedWord[][], style: Partial<TextS
     track.clips.push(c);
     ids.push(c.id);
   });
-  return { trackId, ids };
+  let translationTrackId: string | undefined;
+  if (mode === "two") {
+    translationTrackId = addTrack(p, "text");
+    const t2 = p.tracks.find((t) => t.id === translationTrackId)!;
+    t2.name = "Lyrics (translation)";
+    const small = { ...deepClone(style), size: Math.round(Number(style.size ?? 72) * TRANSLATION_SCALE) };
+    const pos2 = translationPosition(style, position);
+    clean.forEach((_, i) => {
+      const c = translated(i, small, pos2);
+      t2.clips.push(c);
+      ids.push(c.id);
+    });
+  }
+  return { trackId, ids, translationTrackId };
 }
 
 /** Rest-state spec (normalised) for UI reads. */

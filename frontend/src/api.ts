@@ -57,8 +57,19 @@ export const api = {
   textStyles: () => req<{ styles: { id: string; name: string; style: Record<string, unknown> }[] }>("GET", "/api/text-styles"),
   saveTextStyle: (name: string, style: Record<string, unknown>) => req<{ id: string; name: string }>("POST", "/api/text-styles", { name, style }),
   deleteTextStyle: (id: string) => req<{ ok: boolean }>("DELETE", `/api/text-styles/${id}`),
-  lyrics: (p: Project, body: { clipId: string | null; playhead: number; mode: "auto" | "align"; model: string; language: string | null; text?: string }) =>
+  lyrics: (p: Project, body: { clipId: string | null; playhead: number; mode: "auto" | "align" | "lrc"; model: string; language: string | null; text?: string;
+    lrclibId?: number | null; lrc?: string }) =>
     req<{ jobId: string }>("POST", `/api/projects/${p.id}/lyrics`, { project: p, ...body }),
+  lyricsTags: (mediaId: string) => req<{ artist: string; title: string; album: string; duration: number | null }>("GET", `/api/lyrics/tags/${mediaId}`),
+  lyricsSearch: (q: { title: string; artist?: string; album?: string }) =>
+    req<{ results: { id: number; artist: string; title: string; album: string; duration: number; synced: boolean; instrumental: boolean }[] }>(
+      "GET", `/api/lyrics/search?${new URLSearchParams({ title: q.title, artist: q.artist ?? "", album: q.album ?? "" })}`),
+  lyricsTranslate: (body: { lines: string[]; source: string | null; target: string; model: "good" | "best"; script?: "native" | "roman" }) =>
+    req<{ jobId: string }>("POST", "/api/lyrics/translate", body),
+  lyricsRomanize: (lines: string[], diacritics = false) => req<{ lines: string[] }>("POST", "/api/lyrics/romanize", { lines, diacritics }),
+  lyricsLanguages: () => req<{ languages: Record<string, string>; models: Record<"good" | "best", { id: string; name: string; installed: boolean; downloadBytes: number }> }>(
+    "GET", "/api/lyrics/languages"),
+  clearStemsCache: () => req<{ freed: number }>("DELETE", "/api/ai/stems-cache"),
   captions: (p: Project, model: string, language: string | null) =>
     req<{ jobId: string }>("POST", `/api/projects/${p.id}/captions`, { project: p, model, language }),
   estimateSize: (p: Project) => req<{ jobId: string }>("POST", `/api/projects/${p.id}/export/estimate`, { project: p, mode: "final" }),
@@ -147,11 +158,12 @@ export interface AiModel {
   downloadBytes?: number; installed?: boolean; diskBytes: number; jobId?: string | null; deletable?: boolean;
 }
 export interface AiStatus {
-  settings: { device: "auto" | "cpu"; budgetGB: number; personModel: string };
+  settings: { device: "auto" | "cpu"; budgetGB: number; personModel: string; separator: "mel-roformer" | "off"; dereverb: boolean };
   env: { installed: boolean; error?: string; python?: string; torch?: string | null; cuda?: boolean; device?: string;
     vramTotal?: number; vramFree?: number; cudaVersion?: string };
   models: AiModel[];
   other: AiModel[];
   totalBytes: number;
   cacheBytes: number;
+  stemsBytes: number;
 }

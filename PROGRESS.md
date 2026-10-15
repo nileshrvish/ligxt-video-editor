@@ -5,17 +5,18 @@ demos, the reel's history) are in [docs/HISTORY.md](docs/HISTORY.md).
 
 ## Current state
 
-- **Version 2.0.0** (2026-10-15, tag `v2.0.0`). Phases 1-12 are done. **Phase 13a (song lyrics captions)** is done (2026-10-15,
-  no tag requested): Captions > Source "Song lyrics" with Auto (Whisper), Paste lyrics (stable-ts alignment) and Tap to sync.
+- **Version 2.0.0** (2026-10-15, tag `v2.0.0`). Phases 1-12 are done. **Phase 13a** (song lyrics captions: Auto, Paste lyrics,
+  Tap to sync) and **Phase 13b** (2026-10-16, advanced lyrics + translation: vocal separation, synced-lyrics lookup, translation,
+  Noto script fallback with shaped Hindi / Arabic) are done; no tag requested.
 - What exists: timeline editor (trim/split/ripple, snapping, markers), canvas preview matching the export, transitions (xfade + whip),
   colour (presets, LUTs, effects, adjustment layers), motion (keyframes, Ken Burns, punch/shake), speed ramps, audio (ducking, SFX),
   text + auto-captions, export presets, style templates, Cutout (AI matting / SAM objects), AI slow motion (RIFE), motion tracking
-  (follow, tracked blur, auto-reframe), Auto-edit from raw footage and song-lyrics captions. See README.md for how to use it.
-- Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (121) and `cd frontend; npm test` (127); headless UI tests `cd frontend; npm run e2e` (6). The AI tools: `ai-venv` (built by setup.ps1).
+  (follow, tracked blur, auto-reframe), Auto-edit from raw footage and song-lyrics captions (+ translation). See README.md for how to use it.
+- Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (134; the 2 real-translation tests skip until M2M100 / MADLAD are installed) and `cd frontend; npm test` (136); headless UI tests `cd frontend; npm run e2e` (7). The AI tools: `ai-venv` (built by setup.ps1).
 - Git: commit to `master` and push after each tested phase or fix.
 - Stack: FastAPI backend (Python 3.11 `.venv`), React + Vite + TS frontend, ffmpeg 8.1.1 with NVENC, RTX 4050 (6 GB). AI models run
-  in `ai-venv` through `ai_worker/` (BiRefNet, SAM 2.1, RIFE, stable-ts lyric alignment); YuNet, VitTrack and faster-whisper
-  (captions, lyrics Auto mode) run in the main environment.
+  in `ai-venv` through `ai_worker/` (BiRefNet, SAM 2.1, RIFE, stable-ts lyric alignment, python-audio-separator vocal separation,
+  CTranslate2 translation); YuNet, VitTrack and faster-whisper (captions, lyrics Auto mode) run in the main environment.
 
 ## Usage rules (set by the user in Phase 10; apply to every phase)
 
@@ -24,7 +25,7 @@ demos, the reel's history) are in [docs/HISTORY.md](docs/HISTORY.md).
 - Test with automated tests only: pytest and frontend unit tests; a UI flow that needs checking gets a headless Playwright script (no screenshots unless a failure needs debugging).
 - Check video results by extracting frames with ffmpeg and measuring them in scripts, not by viewing the app.
 - Leave the visual and click-through checks to the user, with a clear test checklist.
-- Use only media from `C:\Users\niles\ligxt-test-media` and the projects the user names; don't search other folders. If that folder is missing or empty, stop and say so. (Phases 10-13a: the folder doesn't exist; the user allowed the Travel Dump project's media and, for 13a, the Beat Sync Reel's song, plus `ligxt-test-media` if it ever exists.)
+- Use only media from `C:\Users\niles\ligxt-test-media` and the projects the user names; don't search other folders. If that folder is missing or empty, stop and say so. (Phases 10-13b: the folder doesn't exist; the user allowed the Travel Dump project's media and, for 13a/13b, the Beat Sync Reel's song `Video-78168.mp3`, plus `ligxt-test-media` if it ever exists.)
 - Playwright (headless, a frontend dev dependency) is the tool for UI flows (`frontend/e2e`, `npm run e2e`).
 
 ## AI feature rules (apply to every AI phase)
@@ -52,6 +53,11 @@ Set by the user in Phase 9; every later AI feature follows them.
 - **PowerShell 5.1:** `nativeExe | Select-Object -First 1` sets a non-zero `$LASTEXITCODE`; capture the output first.
 - **ai-venv packages:** install `torchaudio==2.8.0` from the cu128 index before anything that needs it (stable-ts), or pip pulls a
   newer torchaudio that breaks torch 2.8.0+cu128. stable-ts `align()` with faster-whisper needs an explicit language (detect it first).
+  `audio-separator` goes in with `--no-deps` (diffq is CC BY-NC); transformers stays 4.46.3, so the CTranslate2 converter is
+  subclassed to pass `torch_dtype` instead of `dtype`; never copy a Hugging Face `config.json` into a converted CTranslate2 folder.
+- **Pillow + FriBiDi:** Pillow decides whether raqm (shaping) works when `PIL.ImageFont` is first imported: `app/fribidi.py` loads
+  `bin\fribidi\libfribidi-0.dll` first (imported at the top of `main.py` and `text.py`). Latin text keeps the BASIC layout engine
+  so existing layouts don't move; shaped words use raqm.
 - **Working in this repo:** long or backslash-heavy bash heredocs break; write patch scripts to a file and run them with
   `.venv\Scripts\python.exe`. Docs patches: assert every replacement (a silent `str.replace` once dropped an update).
 - **Secrets:** the git remote URL holds a GitHub token: never print it; redact push output with `sed -E 's#https://[^@]*@#https://***@#g'`.
@@ -64,10 +70,13 @@ Set by the user in Phase 9; every later AI feature follows them.
 ## Known issues
 
 - Beat detection tested on synthetic click tracks and one real song (steady 119.6 BPM grid).
-- Lyrics: **no vocal separation.** Demucs' code is MIT but its weights are research-only (maintainer, demucs issue #327); Spleeter's
-  model license is unstated. The user chose "no separation for now", so Whisper and the voice-activity estimate (Silero VAD) run on
-  the full mix: loud music can hide vocals (VAD then says instrumental) and Auto mode is less reliable than on speech. Paste and Tap
-  always work. Lyrics can't be timed on reversed, frozen or speed-ramped music clips (the dialog says so).
+- Lyrics: vocals are separated with Mel-Band RoFormer only (user decision 2026-10-16: no Fast / Best tiers until Balanced is
+  judged). Kim Vocal 2 (no license) and htdemucs_ft (research-only weights, needs CC BY-NC diffq) are not used; UVR DeEcho-DeReverb
+  (no stated license, enabled at the user's request) is an off-by-default option. On sung Hindi (Video-78168.mp3) Whisper still
+  keeps only ~8 reliable words in the first 7 s even on the separated vocals; Look up / Paste / Tap give full lyrics. Vocal presence
+  is the stem's level against the mix (strong backing vocals or lead instruments can count). Lyrics can't be timed on reversed,
+  frozen or speed-ramped music clips. Shaped-script lines animate per word (not per letter); right-to-left lines with embedded
+  Latin words keep the words in base-direction order (no full bidi reordering inside a line).
 - Bug bash (Chrome, 1366x768-class window), not fixed:
   - Built-in template cards start on the plain "1" placeholder card (the preview animates on hover).
   - Exports made before v1.0 can't be re-exported from Recent exports (no recorded settings; the button explains).
@@ -90,8 +99,8 @@ Set by the user in Phase 9; every later AI feature follows them.
   "Beat Sync Reel v6.1" (+ Instagram export) and the "Beat Sync Reel v7 test" copy (text behind the subject). Photos only, so the
   slow-motion, tracking and auto-edit phases left it unchanged. The template "Golden Beat Trip" was saved from it.
   On 2026-10-15 the "Beat Sync Reel v6.1" project (`d15f73526286`) was found missing from `projects\` (not removed by Phase 13a
-  code or tests); its exports and the template remain. Its song is instrumental: no lyrics demo (`exports\lyrics demo
-eport.md`).
+  code or tests); its exports and the template remain. Its song has Hindi vocals throughout (user, 13b): with separation, vocal
+  presence 90 % (`exports\lyrics demo\report_13b.md`).
 - **Travel Dump** (the user's project; original edit unchanged) and **Travel Dump v2** (rebuilt in Phase 11: slam ramps, tracked titles,
   text behind the peak and the neon portrait, auto-reframe; Phase 12: "fuel money" rides the wrist cuff). Exports `Travel Dump v2.mp4`
   + `Travel Dump v2 Instagram.mp4`; breakdown in `exports\travel dump v2 comparison\`.
@@ -99,8 +108,13 @@ eport.md`).
 
 ## Next
 
-- Phase 13a done: waiting for the user to name a song (or a section) with vocals, from a named folder, for the lyrics demo, and to
-  confirm whether "Beat Sync Reel v6.1" was deleted on purpose.
+- **Translation models not installed yet**: the M2M100 download finished (files verified, in `modelsi\m2m100-1.2b`) but Claude Code
+  stopped the one-time conversion when the PC ran low on memory (16 GB RAM); MADLAD-400 never started. Re-run only when the user
+  asks (Settings > Download, with other apps closed; MADLAD loads ~6 GB in fp16 to convert). The real M2M100 round trip worked
+  before two late fixes (tokenizer class, keep CTranslate2's config.json); after them only the test-mode path is verified.
+- Phase 13b done: the user will name a folder with a Hindi song and an English song for lyrics + translation tests (visual checks
+  are theirs). Still open: was "Beat Sync Reel v6.1" deleted on purpose? Whether to keep de-reverb off (needs the real lyrics to
+  judge correctness). Fast / Best separator tiers only after the user has seen Balanced's results.
 - If the user sends the Phase 8 bug / friction list (still empty), fix those first.
 - At the start of a phase: check whether `C:\Users\niles\ligxt-test-media` exists now (it never has).
 - Open question for the user: add RobustVideoMatting (GPL-3.0) for comparison? (Not used without their OK.)

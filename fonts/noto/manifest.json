@@ -1,0 +1,118 @@
+{
+ "license": "SIL Open Font License 1.1 (OFL.txt)",
+ "source": "https://github.com/google/fonts/tree/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl",
+ "files": [
+  {
+   "file": "NotoSans-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosans/NotoSans[wdth,wght].ttf",
+   "size": 2049096,
+   "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
+   "verified": true
+  },
+  {
+   "file": "NotoSansDevanagari-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosansdevanagari/NotoSansDevanagari[wdth,wght].ttf",
+   "size": 641944,
+   "sha256": "14ec4af41f27482216d1c2229f417ff9b1425e1babb014e57d1d40d03229853e",
+   "verified": true
+  },
+  {
+   "file": "NotoSansArabic-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosansarabic/NotoSansArabic[wdth,wght].ttf",
+   "size": 844676,
+   "sha256": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e",
+   "verified": true
+  },
+  {
+   "file": "NotoSansBengali-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosansbengali/NotoSansBengali[wdth,wght].ttf",
+   "size": 463668,
+   "sha256": "dcd42978094e584a849c84a51450eeac40c8826057d566ea6d4b9627a403a05a",
+   "verified": true
+  },
+  {
+   "file": "NotoSansTamil-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosanstamil/NotoSansTamil[wdth,wght].ttf",
+   "size": 340668,
+   "sha256": "aa3a9b321f4b0bb2c40203ffbde9af89713227866e0e13f76e5b9eeea727cf88",
+   "verified": true
+  },
+  {
+   "file": "NotoSansTelugu-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosanstelugu/NotoSansTelugu[wdth,wght].ttf",
+   "size": 888808,
+   "sha256": "e618af7bf999df192ed4f388eba2e563f2b5015034e9cbb317b5bd793bd7334d",
+   "verified": true
+  },
+  {
+   "file": "NotoSansGujarati-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosansgujarati/NotoSansGujarati[wdth,wght].ttf",
+   "size": 672904,
+   "sha256": "9901d8552f1dd5d2c50dbd4caa6f6e174e74e8264f06594ab259ae6e7b1ac428",
+   "verified": true
+  },
+  {
+   "file": "NotoSansGurmukhi-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosansgurmukhi/NotoSansGurmukhi[wdth,wght].ttf",
+   "size": 268608,
+   "sha256": "1e6f728fa620e566f842d81e220265813faa12771214765d289c98e035adc5f2",
+   "verified": true
+  },
+  {
+   "file": "NotoSansKannada-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosanskannada/NotoSansKannada[wdth,wght].ttf",
+   "size": 641372,
+   "sha256": "cca4f3b3a8cb12fb261f1b43baf5d2f7f59d90fe123d41f0065ed3a183997ec9",
+   "verified": true
+  },
+  {
+   "file": "NotoSansMalayalam-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosansmalayalam/NotoSansMalayalam[wdth,wght].ttf",
+   "size": 504204,
+   "sha256": "312e0e7c3cc15fa09eb42a8f749eeb246b593ed420e3c81aafe8d910c3a6fb56",
+   "verified": true
+  },
+  {
+   "file": "NotoSansThai-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosansthai/NotoSansThai[wdth,wght].ttf",
+   "size": 218652,
+   "sha256": "5a1c559bb539583c8a1fd99d1c5b9491e5e14478c9cd2bd0970d5c3096cc9ef8",
+   "verified": true
+  },
+  {
+   "file": "NotoSansHebrew-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosanshebrew/NotoSansHebrew[wdth,wght].ttf",
+   "size": 112640,
+   "sha256": "7ef36a2c3593758cdb622e1bdef4f84523e92fbc3ccc667438dd80ff54c2de88",
+   "verified": true
+  },
+  {
+   "file": "NotoSansSC-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosanssc/NotoSansSC[wght].ttf",
+   "size": 17772300,
+   "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+   "verified": true
+  },
+  {
+   "file": "NotoSansJP-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosansjp/NotoSansJP[wght].ttf",
+   "size": 9589900,
+   "sha256": "c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f",
+   "verified": true
+  },
+  {
+   "file": "NotoSansKR-VF.ttf",
+   "from": "google/fonts@1d0e46c79332:ofl/notosanskr/NotoSansKR[wght].ttf",
+   "size": 10414588,
+   "sha256": "194018e6b2b293a7964f037b25c0249ce1418bc9ab3c971060a03aa57861e252",
+   "verified": true
+  },
+  {
+   "file": "OFL.txt",
+   "from": "google/fonts@1d0e46c79332:ofl/notosans/OFL.txt",
+   "size": 4396,
+   "sha256": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
+   "verified": true
+  }
+ ]
+}

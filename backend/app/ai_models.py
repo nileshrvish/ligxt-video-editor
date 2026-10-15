@@ -104,12 +104,86 @@ CATALOG: dict[str, dict] = {
             ("vocabulary.json", 1068114, "c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1"),
         ]),
     },
+    "whisper-large-v3": {
+        "name": "Whisper large-v3 (song lyrics, non-English)", "task": "speech", "license": "MIT",
+        "source": "https://huggingface.co/Systran/faster-whisper-large-v3", "res": 0, "dynamic": False,
+        "about": "OpenAI's Whisper large-v3 (MIT) in CTranslate2 format: slower than turbo but stronger on sung and "
+                 "non-English vocals (Hindi and others). Runs with faster-whisper on the graphics card.",
+        "files": _hf("Systran/faster-whisper-large-v3", "edaa852ec7e145841d8ffdb056a99866b5f0a478", [
+            ("model.bin", 3087284237, "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1"),
+            ("config.json", 2394, "a9306624f5ec14270a014b647e5c316b6e03a662c369758d1b90697a7b0655b9"),
+            ("preprocessor_config.json", 340, "7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711"),
+            ("tokenizer.json", 2480617, "6d8cbd7cd0d8d5815e478dac67b85a26bbe77c1f5e0c6d76d1ce2abc0e5f21ca"),
+            ("vocabulary.json", 1068114, "c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1"),
+        ]),
+    },
+    "mel-roformer-vocals": {
+        "name": "Mel-Band RoFormer vocals (vocal separation)", "task": "separation", "license": "MIT",
+        "source": "https://huggingface.co/KimberleyJSN/melbandroformer", "res": 0, "dynamic": False,
+        "about": "Kimberley Jensen's Mel-Band RoFormer vocal model (MIT): separates the singing from the music so lyrics "
+                 "can be heard and timed. Run with python-audio-separator (MIT); loaded as weights only.",
+        "files": _hf("KimberleyJSN/melbandroformer", "ac9b0614ab3cd7f77219e18ba494dfd93956c348", [
+            ("MelBandRoformer.ckpt", 913106900, "87201f4d31afb5bc79993230fc49446918425574db48c01c405e44f365c7559e"),
+        ]),
+    },
+    "uvr-deecho-dereverb": {
+        "name": "UVR DeEcho-DeReverb (vocal clean-up)", "task": "dereverb", "license": "Not stated",
+        "userApproved": "2026-10-16: enabled at the user's request (weights only, SHA-256 of the download pinned)",
+        "source": "https://github.com/TRvlvr/model_repo/releases/tag/all_public_uvr_models", "res": 0, "dynamic": False,
+        "about": "Ultimate Vocal Remover's echo / reverb remover (attributed to FoxJoy), applied to the separated vocals. "
+                 "No license is stated by its author; enabled at the user's request (2026-10-16). Loaded as weights only.",
+        # no published checksum: SHA-256 of the download (identical on the UVR and audio-separator release hosts)
+        "files": [{"name": "UVR-DeEcho-DeReverb.pth", "size": 223650277,
+                   "sha256": "e644028ec82865dc0fe082bc6fea85a43f7c71cfe375caee2da2d154aa661ee7",
+                   "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-DeEcho-DeReverb.pth"}],
+    },
+    "m2m100-1.2b": {
+        "name": "M2M100 1.2B (lyrics translation)", "task": "translation", "license": "MIT",
+        "source": "https://huggingface.co/facebook/m2m100_1.2B", "res": 0, "dynamic": False,
+        "about": "Meta's many-to-many translation model (MIT, 100 languages). Downloaded once (5 GB), converted on this "
+                 "computer to CTranslate2 int8 (1.2 GB) and the original is removed.",
+        "files": _hf("facebook/m2m100_1.2B", "7b36184180524c1a1bbfa37f120a608046250b98", [
+            ("pytorch_model.bin", 4958230644, "a58ef8f42362ef12adeddc600b3425f1e2bbd019cfa6aae6b0051e2e3e055cd4"),
+            ("sentencepiece.bpe.model", 2423393, "d8f7c76ed2a5e0822be39f0a4f95a55eb19c78f4593ce609e2edbc2aea4d380a"),
+            ("config.json", 909, "13b5191c92371b2d587baac6c9a04de018a5264d7179020d379a276769051f95"),
+            ("generation_config.json", 233, "aed76366507333ddbb8bd49960f23c82fe6446b3319a46a54befdb45324ccf61"),
+            ("special_tokens_map.json", 1140, "c1a4f86c3874d279ae1b2a05162858db5dd6c61665d84223ed886cbcff08fda6"),
+            ("tokenizer_config.json", 271, "1566a6cfa4f541a55594c9d5e090f530812d5de7c94882ea3af156962d9933ae"),
+            ("vocab.json", 3708092, "b6e77e474aeea8f441363aca7614317c06381f3eacfe10fb9856d5081d1074cc"),
+        ]),
+        "convert": {"kind": "m2m100", "out": "ct2-int8"},
+    },
+    "madlad400-3b": {
+        "name": "MADLAD-400 3B (lyrics translation, Best)", "task": "translation", "license": "Apache-2.0",
+        "source": "https://huggingface.co/google/madlad400-3b-mt", "res": 0, "dynamic": False,
+        "about": "Google's MADLAD-400 machine translation model (Apache-2.0, 400+ languages): better on less common "
+                 "languages. Downloaded once (11.8 GB), converted on this computer to CTranslate2 int8 (about 3 GB) and the "
+                 "original is removed. Google calls it a research model.",
+        "files": _hf("google/madlad400-3b-mt", "fa184c675da0b5c9e1c8694fccd4e12e2d422094", [
+            ("model.safetensors", 11761587872, "66ff5f8fcaf92291da486fdfbd4d5233cec90e1359348a56e3172c978b3a76d4"),
+            ("spiece.model", 4427844, "ef11ac9a22c7503492f56d48dce53be20e339b63605983e9f27d2cd0e0f3922c"),
+            ("tokenizer.json", 16629031, "a2799ccc696b752ba00c34f58726bfe253a04921ceb6cfc620400f560474790b"),
+            ("added_tokens.json", 4, "d914176fd50bd7f565700006a31aa97b79d3ad17cee20c8e5ff2061d5cb74817"),
+            ("config.json", 749, "cad399cab799b99409a6ec2d90d72552257c2bb752861261d2016691e0643e7c"),
+            ("generation_config.json", 142, "0849b38987568ccfe4ebefc22bbda1cec4bee01c345e93bfab207d4692b0a1d5"),
+            ("special_tokens_map.json", 414, "7f79f1d5063d56c4b980eec0692f3c7429bdef335071d34e566bd00fd4b5e3e0"),
+            ("tokenizer_config.json", 830, "641fc660745306dfb935f666a68f8bc10a44c39241cfb357be518fda8c09662d"),
+        ]),
+        "convert": {"kind": "madlad", "out": "ct2-int8"},
+    },
 }
 PERSON_MODELS = [k for k, v in CATALOG.items() if v["task"] == "person"]
 LYRICS_MODEL = "whisper-large-v3-turbo"
+LYRICS_MODEL_V3 = "whisper-large-v3"
+SEPARATION_MODEL = "mel-roformer-vocals"
+DEREVERB_DEFAULT = False  # Phase 13b measurement: +0-1 words, higher confidence, correctness unverified -> opt-in
+TRANSLATION_MODELS = {"good": "m2m100-1.2b", "best": "madlad400-3b"}
+DEREVERB_MODEL = "uvr-deecho-dereverb"
 RIFE_MODEL = "rife-4.26"
 OBJECT_MODEL = "sam2.1-small"
-DEFAULT_SETTINGS = {"device": "auto", "budgetGB": 4.5, "personModel": "birefnet"}  # best quality on the test clips
+DEFAULT_SETTINGS = {"device": "auto", "budgetGB": 4.5, "personModel": "birefnet",  # best quality on the test clips
+                    "separator": "mel-roformer", "dereverb": DEREVERB_DEFAULT}
+SEPARATORS = {"mel-roformer": SEPARATION_MODEL, "off": None}  # the only separator for now (user decision, Phase 13b)
 
 
 # ---------------------------------------------------------------- settings
@@ -121,6 +195,9 @@ def load_settings() -> dict:
     out = {**DEFAULT_SETTINGS, **{k: v for k, v in s.items() if k in DEFAULT_SETTINGS}}
     if out["personModel"] not in CATALOG:
         out["personModel"] = DEFAULT_SETTINGS["personModel"]
+    if out["separator"] not in SEPARATORS:
+        out["separator"] = DEFAULT_SETTINGS["separator"]
+    out["dereverb"] = bool(out["dereverb"])
     out["budgetGB"] = max(1.0, min(5.5, float(out["budgetGB"])))
     return out
 
@@ -129,6 +206,8 @@ class SettingsBody(BaseModel):
     device: str | None = None
     budgetGB: float | None = None
     personModel: str | None = None
+    separator: str | None = None
+    dereverb: bool | None = None
 
 
 @router.put("/settings")
@@ -144,6 +223,12 @@ def put_settings(body: SettingsBody):
         if body.personModel not in PERSON_MODELS:
             raise HTTPException(400, "Unknown model.")
         s["personModel"] = body.personModel
+    if body.separator is not None:
+        if body.separator not in SEPARATORS:
+            raise HTTPException(400, "Unknown vocal separator.")
+        s["separator"] = body.separator
+    if body.dereverb is not None:
+        s["dereverb"] = bool(body.dereverb)
     SETTINGS_FILE.write_text(json.dumps(s, indent=1), encoding="utf-8")
     return s
 
@@ -163,6 +248,8 @@ def is_installed(mid: str) -> bool:
     ok_file = d / ".verified"
     if not ok_file.exists():
         return False
+    if spec.get("convert"):
+        return (d / spec["convert"]["out"] / "model.bin").exists()
     return all((d / f["name"]).exists() and (d / f["name"]).stat().st_size == f["size"] for f in spec.get("installs") or spec["files"])
 
 
@@ -256,6 +343,14 @@ def download(mid: str, ctx: JobContext | None, p0: float = 0.0, p1: float = 1.0)
         (d / inst["name"]).write_bytes(data)
     for inst in spec.get("installs") or []:
         (d / inst["from"]).unlink(missing_ok=True)
+    if spec.get("convert"):  # convert once in the AI worker (needs PyTorch), then drop the original weights
+        from . import ai_bridge
+        if ctx:
+            ctx.progress(p1, f"Converting {spec['name']} (once; a few minutes)")
+        ai_bridge.call("convert_mt", {"src": str(d), "out": str(d / spec["convert"]["out"]), "kind": spec["convert"]["kind"]},
+                       cancelled=ctx.cancelled if ctx else None)
+        for f in spec["files"]:
+            (d / f["name"]).unlink(missing_ok=True)
     (d / ".verified").write_text(json.dumps({"verified": time.time(), "files": [f["name"] for f in spec.get("installs") or spec["files"]]}), encoding="utf-8")
 
 
@@ -331,11 +426,15 @@ def status(refresh: bool = False):
     return {"settings": s, "env": probe(refresh) if not ai_bridge.busy() or refresh else (_probe_cache["data"] or {"installed": bool(ai_python())}),
             "models": models, "other": other_models(),
             "totalBytes": sum(m["diskBytes"] for m in models) + sum(m["diskBytes"] for m in other_models()),
-            "cacheBytes": cutout_cache_bytes()}
+            "cacheBytes": cutout_cache_bytes(), "stemsBytes": stems_cache_bytes()}
 
 
 def cutout_cache_bytes() -> int:
     return sum(_dir_size(d) for d in config.CACHE_DIR.glob("*/cutout"))
+
+
+def stems_cache_bytes() -> int:
+    return sum(_dir_size(d) for d in config.CACHE_DIR.glob("*/stems"))
 
 
 @router.post("/models/{mid}/download")
@@ -382,6 +481,16 @@ def delete_model(mid: str):
 def clear_cutout_cache():
     freed = 0
     for d in config.CACHE_DIR.glob("*/cutout"):
+        freed += _dir_size(d)
+        shutil.rmtree(d, ignore_errors=True)
+    return {"freed": freed}
+
+
+@router.delete("/stems-cache")
+def clear_stems_cache():
+    """Separated vocals (song lyrics) are kept per song range; they are rebuilt when needed."""
+    freed = 0
+    for d in config.CACHE_DIR.glob("*/stems"):
         freed += _dir_size(d)
         shutil.rmtree(d, ignore_errors=True)
     return {"freed": freed}

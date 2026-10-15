@@ -26,6 +26,10 @@ def clip(spec, D=2.0, tr=None, kf=None):
 
 words = "we walk through the old town".split()
 timed = [{"text": w, "start": 0.25 * i, "end": 0.25 * i + 0.25} for i, w in enumerate(words)]
+hi = "नमस्ते दुनिया क्षत्रिय"  # "hello world kshatriya"
+hi_timed = [{"text": w, "start": 0.4 * i, "end": 0.4 * i + 0.4} for i, w in enumerate(hi.split())]
+ar = "مرحبا بالعالم"  # "hello world"
+ar_timed = [{"text": w, "start": 0.5 * i, "end": 0.5 * i + 0.5} for i, w in enumerate(ar.split())]
 cases = [
     ("hook pop + fade", clip(T._merge(P["hook"]["style"], {"content": "Goa in golden hour"}), tr={"y": -420}), [0, 0.05, 0.17, 0.4, 1.0, 1.9]),
     ("lower third slide + box", clip(T._merge(P["lowerthird"]["style"], {"content": "Old Goa, India"}), tr={"x": -150, "y": 420}), [0, 0.2, 0.5, 1.85]),
@@ -45,6 +49,13 @@ cases = [
                                         "opacity": [{"time": 0, "value": 0.5, "easing": "linear"}, {"time": 1, "value": 1, "easing": "linear"}]}),
      [0.1, 0.25, 0.9, 1.5]),
     ("retro fade, right aligned", clip(T._merge(P["retro"]["style"], {"content": "A long retro title that wraps", "align": "right", "maxWidth": 600})), [0.2, 1.0, 1.8]),
+    # Phase 13b: complex scripts (Noto fallback, shaped words as units, right-to-left lines)
+    ("devanagari words reveal + pop", clip(T._merge(P["caption"]["style"], {"content": hi, "words": hi_timed, "highlight": {"style": "revealpop", "color": "#ffd34d"}}),
+                                       D=1.6, tr={"y": 380}), [0.1, 0.45, 0.8, 1.3]),
+    ("devanagari + latin typewriter", clip({"content": "Goa में सूरज", "font": "Anton-Regular", "size": 110,
+                                         "animIn": {"type": "typewriter", "duration": 1.0, "easing": "linear"}}), [0.2, 0.5, 0.9]),
+    ("arabic rtl caption colour", clip({"content": ar, "words": ar_timed, "highlight": {"style": "color", "color": "#ff0000"}}, D=1.2), [0.1, 0.5, 1.0]),
+    ("arabic words in", clip({"content": ar, "size": 90, "animIn": {"type": "words", "duration": 0.8, "easing": "out"}}), [0.1, 0.45, 1.0]),
 ]
 out = []
 for name, c, taus in cases:

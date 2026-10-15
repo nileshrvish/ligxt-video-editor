@@ -127,6 +127,7 @@ export default function TextPanel({ clip }: { clip: Clip }) {
           <span className="faint" style={{ fontSize: 11 }}>{clipDuration(clip).toFixed(2)} s on the timeline</span>
         </div>
         <SafetyNote clipId={clip.id} />
+        <Retranslate clip={clip} />
         <BehindSubject clip={clip} on={!!(s as { behindSubject?: boolean }).behindSubject} onChange={(v) => patch({ behindSubject: v })} />
       </div>
 
@@ -260,6 +261,42 @@ export default function TextPanel({ clip }: { clip: Clip }) {
 }
 
 /** Text between the background and the person (needs Cutout on the main-track clip under the text). */
+/** A translated lyrics line (Phase 13b): shows its source line and translates it again (e.g. after editing the source). */
+function Retranslate({ clip }: { clip: Clip }) {
+  const tr = (clip.text as { translation?: { source: string; from: string; to: string; model: "good" | "best"; script?: "native" | "roman" } } | null)?.translation;
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [src, setSrc] = useState(tr?.source ?? "");
+  useEffect(() => setSrc(tr?.source ?? ""), [clip.id, tr?.source]);
+  const job = useApp((x) => (jobId ? x.jobs[jobId] : undefined));
+  const update = useClipUpdate(clip.id);
+  useEffect(() => {
+    if (!job || (job.status !== "done" && job.status !== "error")) return;
+    setJobId(null);
+    if (job.status === "error") {
+      toastError("Translation failed", job.error);
+      return;
+    }
+    const line = (job.result as { lines: string[] }).lines[0] ?? "";
+    update((c) => {
+      TE.setContent(c, line);
+      TE.patchText(c, { translation: { ...tr, source: src } });
+    }, true);
+  }, [job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!tr) return null;
+  const busy = !!jobId;
+  return (
+    <div className="cut-status" style={{ marginTop: 6 }} data-testid="tx-translation">
+      <div className="faint" style={{ fontSize: 11 }}>Translated {tr.from} → {tr.to} ({tr.model === "best" ? "MADLAD-400" : "M2M100"}). Source line:</div>
+      <input className="input" value={src} onChange={(e) => setSrc(e.target.value)} />
+      <button className="btn sm" disabled={busy || !src.trim()} style={{ marginTop: 4 }}
+        onClick={() => api.lyricsTranslate({ lines: [src], source: tr.from, target: tr.to, model: tr.model, script: tr.script ?? "native" })
+          .then((r) => setJobId(r.jobId), (e) => toastError("Translation could not start", e))}>
+        {busy ? "Translating…" : "Re-translate this line"}
+      </button>
+    </div>
+  );
+}
+
 function BehindSubject({ clip, on, onChange }: { clip: Clip; on: boolean; onChange: (v: boolean) => void }) {
   const key = useEditor((st) => {
     const main = st.project?.tracks.find((t) => t.type === "video");

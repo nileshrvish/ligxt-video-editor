@@ -8,6 +8,13 @@ composes them frame by frame here. What moves where (block/unit transforms, alph
 
 Coordinates: "layout" = canvas pixels relative to the top-left of the text block (w x h). The
 images cover the block plus a margin `m` on every side, at RES image pixels per canvas pixel.
+
+Scripts (Phase 13b): a word the chosen font can't draw falls back to the bundled Noto Sans font for its script
+(fonts/noto, OFL), at a weight close to the chosen font's. Words that need shaping (Devanagari and the other Indic
+scripts, Arabic, Hebrew, Thai, combining marks) are shaped as a whole with raqm (HarfBuzz + FriBiDi; the FriBiDi DLL
+is bin/fribidi, LGPL) and are one layout unit each, so per-character animations move them per word; lines whose
+first strong character is right-to-left are laid out right to left. Lines in the chosen (Latin) font keep the
+original per-character layout, unchanged.
 """
 from __future__ import annotations
 
@@ -16,11 +23,15 @@ import hashlib
 import json
 import math
 import os
+import sys
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+from . import fribidi  # noqa: F401  (must come before PIL.ImageFont)
+from PIL import Image, ImageDraw, ImageFilter, ImageFont  # noqa: E402
 
 from . import motion as M
 from .config import CACHE_DIR, ROOT
@@ -31,7 +42,28 @@ FONTS_DIR = ROOT / "fonts"
 FONTS = {f["id"]: f for f in SHARED["fonts"]}
 DEFAULTS = SHARED["defaults"]
 TEXT_CACHE = CACHE_DIR / "_text"
-LAYOUT_VERSION = 2
+LAYOUT_VERSION = 3  # 3: script fallback + shaping (Latin layouts unchanged)
+NOTO_DIR = FONTS_DIR / "noto"
+FRIBIDI_SHA256 = "14bd0ed4c24d0068434bc23cd4f39e8dc0edcf56f2c9996b6fe39b39ffc54673"
+# script fallbacks, tried in order (the first that has every character of the word wins)
+FALLBACKS = ["NotoSansDevanagari-VF.ttf", "NotoSansArabic-VF.ttf", "NotoSansBengali-VF.ttf", "NotoSansTamil-VF.ttf",
+             "NotoSansTelugu-VF.ttf", "NotoSansGujarati-VF.ttf", "NotoSansGurmukhi-VF.ttf", "NotoSansKannada-VF.ttf",
+             "NotoSansMalayalam-VF.ttf", "NotoSansThai-VF.ttf", "NotoSansHebrew-VF.ttf", "NotoSans-VF.ttf",
+             "NotoSansSC-VF.ttf", "NotoSansJP-VF.ttf", "NotoSansKR-VF.ttf"]
+# shaping needed: Hebrew, Arabic (+ supplements, presentation forms), Syriac, Thaana, NKo, Indic, Thai, Lao, Tibetan, Myanmar
+_COMPLEX = [(0x0590, 0x08FF), (0x0900, 0x0DFF), (0x0E00, 0x0FFF), (0x1000, 0x109F), (0xFB1D, 0xFDFF), (0xFE70, 0xFEFF)]
+_IGNORE = {0x200C, 0x200D, 0x200E, 0x200F, 0xFE0F}  # joiners, direction marks, emoji presentation
+
+
+def _raqm() -> bool:
+    try:
+        from PIL import features
+        return bool(features.check("raqm"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+RAQM = _raqm()
 
 
 # ---------------------------------------------------------------- spec
@@ -77,8 +109,87 @@ def _rgba(color: str, opacity: float = 1.0) -> tuple[int, int, int, int]:
 
 @lru_cache(maxsize=64)
 def _font(font_id: str, px: float) -> ImageFont.FreeTypeFont:
+    """The chosen font with Pillow's basic layout (the original per-character layout of Latin text)."""
     f = FONTS.get(font_id) or FONTS[DEFAULTS["font"]]
-    return ImageFont.truetype(str(FONTS_DIR / f["file"]), px)
+    return ImageFont.truetype(str(FONTS_DIR / f["file"]), px, layout_engine=ImageFont.Layout.BASIC)
+
+
+@lru_cache(maxsize=64)
+def _shaping_font(path: str, px: float, weight: int) -> ImageFont.FreeTypeFont:
+    """A font for shaped runs (raqm when available); variable fonts are set to `weight`."""
+    f = ImageFont.truetype(path, px, layout_engine=ImageFont.Layout.RAQM if RAQM else ImageFont.Layout.BASIC)
+    try:
+        axes = f.get_variation_axes()
+        vals = []
+        for ax in axes:
+            name = ax.get("name", b"")
+            name = name.decode() if isinstance(name, bytes) else str(name)
+            if name.lower().startswith("weight"):
+                vals.append(max(ax["minimum"], min(ax["maximum"], weight)))
+            else:
+                vals.append(ax.get("default", ax["minimum"]))
+        if axes:
+            f.set_variation_by_axes(vals)
+    except Exception:  # noqa: BLE001  (static font, or FreeType without variations)
+        pass
+    return f
+
+
+@lru_cache(maxsize=64)
+def _cmap(path: str) -> frozenset:
+    from fontTools.ttLib import TTFont
+    with TTFont(path, lazy=True) as t:
+        return frozenset(t.getBestCmap() or {})
+
+
+def font_weight(font_id: str) -> int:
+    f = FONTS.get(font_id) or FONTS[DEFAULTS["font"]]
+    if "weight" in f:
+        return int(f["weight"])
+    n = f["id"].lower()
+    return 800 if any(k in n for k in ("anton", "black", "bebas")) else 700 if "bold" in n else 600 if "semibold" in n else 400
+
+
+def _needs_shaping(word: str) -> bool:
+    for ch in word:
+        o = ord(ch)
+        if any(a <= o <= b for a, b in _COMPLEX) or unicodedata.category(ch).startswith("M"):
+            return True
+    return False
+
+
+def _is_rtl_line(line: str) -> bool:
+    for ch in line:
+        bd = unicodedata.bidirectional(ch)
+        if bd in ("R", "AL"):
+            return True
+        if bd == "L":
+            return False
+    return False
+
+
+def word_font(font_id: str, word: str) -> str | None:
+    """None = the chosen font draws every character; else the path of the Noto fallback for the word."""
+    need = {ord(c) for c in word if not c.isspace() and ord(c) not in _IGNORE}
+    main = FONTS.get(font_id) or FONTS[DEFAULTS["font"]]
+    if not need or need <= _cmap(str(FONTS_DIR / main["file"])):
+        return None
+    best, best_n = None, -1
+    for fb in FALLBACKS:
+        path = NOTO_DIR / fb
+        if not path.exists():
+            continue
+        got = len(need & _cmap(str(path)))
+        if got == len(need):
+            return str(path)
+        if got > best_n:
+            best, best_n = str(path), got
+    return best
+
+
+def line_is_plain(font_id: str, line: str) -> bool:
+    """Drawn with the original per-character layout: the chosen font covers it and nothing needs shaping."""
+    return not _is_rtl_line(line) and all(word_font(font_id, w) is None and not _needs_shaping(w) for w in line.split(" ") if w)
 
 
 def text_of(s: dict) -> str:
@@ -87,8 +198,10 @@ def text_of(s: dict) -> str:
 
 
 # ---------------------------------------------------------------- layout + raster
-def _wrap(font, text: str, ls: float, max_w: float) -> list[str]:
+def _wrap(font, text: str, ls: float, max_w: float, measure=None) -> list[str]:
     def width(line: str) -> float:
+        if measure is not None:
+            return measure(line)
         return font.getlength(line) + ls * max(0, len(line) - 1)
     lines: list[str] = []
     for para in text.split("\n"):
@@ -124,13 +237,47 @@ def build(spec: dict) -> dict:
     asc, desc = font.getmetrics()
     sw = int(round(max(0.0, float(s["outline"]["width"])) * R))
     text = text_of(s)
-    lines = _wrap(font, text, ls, float(s["maxWidth"]) * R)
-    widths = [font.getlength(ln) + ls * max(0, len(ln) - 1) for ln in lines]
+    weight = font_weight(s["font"])
+
+    def units(line: str) -> list[dict]:
+        """Layout units of a line that isn't plain: characters of plain words, whole words otherwise, spaces.
+        Each: text, font, adv (image px). Logical (reading) order."""
+        out = []
+        for k, wd in enumerate(line.split(" ")):
+            if k:
+                out.append({"t": " ", "font": font, "adv": font.getlength(" "), "word": False})
+            if not wd:
+                continue
+            fb = word_font(s["font"], wd)
+            if fb is None and not _needs_shaping(wd):
+                for ch in wd:
+                    out.append({"t": ch, "font": font, "adv": font.getlength(ch), "word": False})
+            else:
+                f2 = _shaping_font(fb, size * R, weight) if fb else _shaping_font(str(FONTS_DIR / (FONTS.get(s["font"]) or FONTS[DEFAULTS["font"]])["file"]), size * R, weight)
+                out.append({"t": wd, "font": f2, "adv": f2.getlength(wd), "word": True})
+        return out
+
+    def line_width(line: str) -> float:
+        if line_is_plain(s["font"], line):
+            return font.getlength(line) + ls * max(0, len(line) - 1)
+        us = units(line)
+        return sum(u["adv"] for u in us) + ls * max(0, len(us) - 1)
+
+    lines = _wrap(font, text, ls, float(s["maxWidth"]) * R, line_width)
+    widths = [line_width(ln) for ln in lines]
+    # fallback fonts can reach higher / lower than the chosen font: keep them inside the images
+    extra = 0.0
+    for ln in lines:
+        if not line_is_plain(s["font"], ln):
+            for u in units(ln):
+                if u["font"] is not font:
+                    a2, d2 = u["font"].getmetrics()
+                    extra = max(extra, a2 - asc, d2 - desc)
     w = math.ceil(max(widths + [1.0]) / R)
     h = math.ceil(len(lines) * line_h / R)
     sh = s["shadow"]
     bx = s["box"]
-    m = 6 + math.ceil(max(0.0, float(s["outline"]["width"])))
+    m = 6 + math.ceil(max(0.0, float(s["outline"]["width"]))) + math.ceil(extra / R)
     if sh.get("enabled"):
         m += math.ceil(3 * float(sh["blur"]) + max(abs(float(sh["x"])), abs(float(sh["y"]))))
     if bx.get("enabled"):
@@ -146,11 +293,21 @@ def build(spec: dict) -> dict:
         ox = {"left": 0.0, "center": (w * R - lw) / 2, "right": w * R - lw}.get(s["align"], (w * R - lw) / 2)
         y_top = j * line_h
         word_i = None
-        for i, ch in enumerate(ln):
-            x = ox + font.getlength(ln[:i]) + ls * i
-            adv = font.getlength(ch)
+        if line_is_plain(s["font"], ln):  # the original per-character layout
+            seq = []
+            for i, ch in enumerate(ln):
+                seq.append((ch, font, ox + font.getlength(ln[:i]) + ls * i, font.getlength(ch)))
+        else:  # units: x in visual order (right to left for RTL lines), kept in reading order
+            us = units(ln)
+            xs, x = [0.0] * len(us), 0.0
+            order = list(range(len(us)))[::-1] if _is_rtl_line(ln) else list(range(len(us)))
+            for k in order:
+                xs[k] = ox + x
+                x += us[k]["adv"] + ls
+            seq = [(u["t"], u["font"], xs[k], u["adv"]) for k, u in enumerate(us)]
+        for ch, f2, x, adv in seq:
             if ch.strip():
-                bb = font.getbbox(ch, anchor="ls")
+                bb = f2.getbbox(ch, anchor="ls")
                 left, right = x + bb[0] - sw, x + bb[2] + sw
                 if word_i is None:
                     word_i = len(words)
@@ -162,7 +319,7 @@ def build(spec: dict) -> dict:
                 left = right = x + adv / 2
                 word_i = None
                 wi = -1
-            chars.append({"c": ch, "x": x, "y": y_top, "left": left, "right": right, "word": wi, "line": j})
+            chars.append({"c": ch, "x": x, "y": y_top, "left": left, "right": right, "word": wi, "line": j, "font": f2, "adv": adv})
 
     # tiles (layout coords) that partition each line slot, so units can be drawn separately
     def slot(j: int) -> tuple[float, float]:
@@ -171,7 +328,7 @@ def build(spec: dict) -> dict:
         return y0, y1
 
     for j in range(len(lines)):
-        idx = [i for i, c in enumerate(chars) if c["line"] == j]
+        idx = sorted((i for i, c in enumerate(chars) if c["line"] == j), key=lambda i: chars[i]["x"])
         y0, y1 = slot(j)
         bounds = [-float(m)]
         for a, b in zip(idx, idx[1:]):
@@ -181,14 +338,15 @@ def build(spec: dict) -> dict:
             c = chars[i]
             c["tile"] = [bounds[k], y0, bounds[k + 1], y1]
             c["anchor"] = [((c["left"] + c["right"]) / 2) / R if c["c"].strip() else c["x"] / R, (c["y"] + line_h / 2) / R]
-        wl = [k for k, wd in enumerate(words) if wd["line"] == j]
+        wl = sorted((k for k, wd in enumerate(words) if wd["line"] == j), key=lambda k: chars[words[k]["first"]]["x"])
         wb = [-float(m)]
         for a, b in zip(wl, wl[1:]):
             wb.append(max(wb[-1], (chars[words[a]["last"]]["right"] + chars[words[b]["first"]]["left"]) / 2 / R))
         wb.append(float(w + m))
         for k, wi in enumerate(wl):
             wd = words[wi]
-            lft, rgt = chars[wd["first"]]["left"], chars[wd["last"]]["right"]
+            span = [chars[i] for i in range(wd["first"], wd["last"] + 1)]
+            lft, rgt = min(c["left"] for c in span), max(c["right"] for c in span)
             wd["tile"] = [wb[k], y0, wb[k + 1], y1]
             wd["anchor"] = [((lft + rgt) / 2) / R, (j * line_h + line_h / 2) / R]
 
@@ -200,11 +358,11 @@ def build(spec: dict) -> dict:
             oc = _rgba(s["outline"]["color"])
             for c in chars:
                 if c["c"].strip():
-                    dr.text((c["x"] + mR, c["y"] + base_y + mR), c["c"], font=font, anchor="ls", fill=oc,
+                    dr.text((c["x"] + mR, c["y"] + base_y + mR), c["c"], font=c["font"], anchor="ls", fill=oc,
                             stroke_width=sw, stroke_fill=oc)
         for c in chars:
             if c["c"].strip():
-                dr.text((c["x"] + mR, c["y"] + base_y + mR), c["c"], font=font, anchor="ls", fill=fill)
+                dr.text((c["x"] + mR, c["y"] + base_y + mR), c["c"], font=c["font"], anchor="ls", fill=fill)
         if sh.get("enabled") and float(sh["opacity"]) > 0:
             a = np.array(im)[..., 3].astype(np.float32)
             r, g, b, _ = _rgba(sh["color"])
@@ -238,7 +396,7 @@ def build(spec: dict) -> dict:
                 continue
             idx = [c for c in chars if c["line"] == j]
             x0 = min(c["x"] for c in idx)
-            x1 = max(c["x"] + font.getlength(c["c"]) for c in idx)
+            x1 = max(c["x"] + c["adv"] for c in idx)
             y0 = j * line_h + (line_h - ink_h) / 2
             rects.append([x0 - px, y0 - py, x1 + px, y0 + ink_h + py])
         if bx.get("mode") == "block" and rects:

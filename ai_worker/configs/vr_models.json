@@ -1,0 +1,4 @@
+{
+  "_about": "Parameters of the VR-architecture models used, normally fetched by python-audio-separator from TRvlvr/application_data (vr_model_data/model_data_new.json, keyed by the MD5 of the file's last 10,240,000 bytes). Vendored so nothing is fetched at run time.",
+  "UVR-DeEcho-DeReverb.pth": {"hash": "0fb9249ffe4ffc38d7b16243f394c0ff", "vr_model_param": "4band_v3", "primary_stem": "No Reverb"}
+}

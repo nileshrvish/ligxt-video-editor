@@ -97,6 +97,42 @@ export default function Settings() {
           </div>
         )}
 
+        <div className="section-title">Vocal separator (song lyrics)</div>
+        {st && (() => {
+          const roformer = st.models.find((m) => m.id === "mel-roformer-vocals");
+          const dereverb = st.models.find((m) => m.id === "uvr-deecho-dereverb");
+          return (
+            <div className="set-card" data-testid="set-separator">
+              <div className="set-row">
+                <b>Separator</b>
+                <select className="input" style={{ maxWidth: 360 }} value={st.settings.separator} onChange={(e) => put({ separator: e.target.value as "mel-roformer" | "off" })}>
+                  <option value="mel-roformer">Mel-Band RoFormer vocals (MIT; recommended)</option>
+                  <option value="off">Off: use the full mix (less reliable on songs)</option>
+                </select>
+              </div>
+              <div className="faint" style={{ fontSize: 12 }}>
+                Song lyrics first separate the singing from the music, with python-audio-separator (MIT) running {roformer?.name ?? "Mel-Band RoFormer"} (license {roformer?.license ?? "MIT"}).
+                {roformer && !roformer.installed ? ` Downloads ${fmt(roformer.downloadBytes ?? 0)} on first use.` : ""} Fast and Best separators are not offered: their models have no stated license or research-only weights.
+              </div>
+              <label className="row fl-check" title="Runs after the separator, before Whisper">
+                <input type="checkbox" checked={st.settings.dereverb} disabled={st.settings.separator === "off"} onChange={(e) => put({ dereverb: e.target.checked })} />
+                Remove echo and reverb from the vocals (UVR DeEcho-DeReverb)
+              </label>
+              <div className="faint" style={{ fontSize: 12 }}>
+                License: <b>{dereverb?.license ?? "Not stated"}</b> by its author; enabled at your request. Off by default: on the test song it found 0-1 more words with higher confidence, but whether
+                they were more correct couldn't be checked.{dereverb && !dereverb.installed ? ` Downloads ${fmt(dereverb.downloadBytes ?? 0)} on first use.` : ""}
+              </div>
+              <div className="set-row">
+                <span>Separated vocals are kept per song section so repeat runs are instant: <b>{fmt(st.stemsBytes ?? 0)}</b>.</span>
+                <button className="btn ghost sm danger" disabled={!st.stemsBytes}
+                  onClick={() => api.clearStemsCache().then((r) => { toast({ kind: "success", title: `Freed ${fmt(r.freed)}` }); load(); }, (e) => toastError("Could not clear", e))}>
+                  <Icon name="trash" size={12} /> Clear
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="section-title">Models <span className="spacer" /><span className="faint" style={{ fontSize: 12 }}>{st ? `${fmt(st.totalBytes)} on disk` : ""}</span></div>
         {st && (
           <div className="set-card">

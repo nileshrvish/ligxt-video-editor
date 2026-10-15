@@ -143,6 +143,12 @@ def test_real_whisper_and_stable_ts_on_a_voice_over_music(client, tmp_path, monk
                     "[0]volume=0.35[a];[1]volume=1.6,adelay=2000:all=1[b];[a][b]amix=inputs=2:duration=first:normalize=0", "-ar", "44100", str(song)], check=True)
     m = upload(client, song)
     p = project_with(client, m["id"], start=0.0, inp=0.0, outp=9.0)
+    # Auto separates the vocals first (Phase 13b) and paste mode aligns with stable-ts: both run in the real AI environment
+    ai_py = Path(config.ROOT) / "ai-venv" / "Scripts" / "python.exe"
+    if not ai_py.exists():
+        pytest.skip("ai-venv is not installed")
+    ai_bridge.stop()
+    monkeypatch.setenv("LIGXT_AI_PYTHON", str(ai_py))
     j = wait_job(client, client.post(f"/api/projects/{p['id']}/lyrics", json={"project": p, "mode": "auto", "model": "large-v3-turbo"}).json()["jobId"],
                  timeout=600)
     assert j["status"] == "done", (j.get("error"), j.get("log"))
@@ -150,12 +156,6 @@ def test_real_whisper_and_stable_ts_on_a_voice_over_music(client, tmp_path, monk
     assert sum(1 for w in sentence.split() if w in got) >= 6, got
     assert not j["result"]["instrumental"]
     assert all(1.5 < w["start"] < 9.0 for w in j["result"]["words"]), j["result"]["words"]
-    # paste mode aligns with stable-ts, which lives in ai-venv: run the worker with the real AI environment
-    ai_py = Path(config.ROOT) / "ai-venv" / "Scripts" / "python.exe"
-    if not ai_py.exists():
-        pytest.skip("ai-venv is not installed")
-    ai_bridge.stop()
-    monkeypatch.setenv("LIGXT_AI_PYTHON", str(ai_py))
     j = wait_job(client, client.post(f"/api/projects/{p['id']}/lyrics", json={"project": p, "mode": "align", "text": "the quick brown fox\njumps over the lazy dog"}).json()["jobId"],
                  timeout=600)
     ai_bridge.stop()

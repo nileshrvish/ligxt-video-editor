@@ -80,6 +80,12 @@ if ($AiOk) {
     if ($LASTEXITCODE -ne 0) { $AiOk = $false; Write-Host "Installing the AI packages failed." -ForegroundColor Yellow }
 }
 if ($AiOk) {
+    # Vocal separation for song lyrics (python-audio-separator, MIT) without its declared dependencies: diffq
+    # (CC BY-NC 4.0, Demucs only) and onnx-weekly / onnx2torch are not needed; the rest is in requirements.txt.
+    & $AiPy -m pip install --no-deps "audio-separator==0.47.0" --timeout 60 --retries 10
+    if ($LASTEXITCODE -ne 0) { Write-Host "Vocal separation could not be installed. Song lyrics use the full mix." -ForegroundColor Yellow }
+}
+if ($AiOk) {
     # Click-to-select (SAM 2, Apache-2.0) from Meta's repository at a pinned commit, without its optional
     # CUDA extension. Needs git. If this fails, only click-to-select is unavailable.
     $env:SAM2_BUILD_CUDA = "0"

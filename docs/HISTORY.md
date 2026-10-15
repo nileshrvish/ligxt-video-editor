@@ -20,6 +20,7 @@ The detailed notes of Phases 1-12, moved out of PROGRESS.md (verbatim, in the or
 | 11 | Motion tracking: face (YuNet), box (VitTrack) and AI click (SAM 2.1) trackers both ways with fixes + re-track, follow (text, stickers, overlays) with position/scale/rotation/smoothing/safe areas, tracked blur/pixelate/grade regions, auto-reframe, templates (main face); Playwright UI tests; Tracking Demo + Travel Dump v2 | **Done** (2026-10-14), v1.3.0 |
 | 12 | Auto-edit from raw footage: analysis (PySceneDetect shots, sharpness, exposure, faces, motion, steadiness, composition, duplicates, unusable moments), style drafts (Energetic / Cinematic / Chill, beat-sync around the drop or a template), review (swap, lock, exclude, regenerate), project + report; demo in three styles vs Travel Dump v2 | **Done** (2026-10-15), v2.0.0 |
 | 13a | Song lyrics captions: Captions > Source "Song lyrics" on a music clip; Auto (faster-whisper small or Best = large-v3-turbo, VAD, hallucination guard), Paste lyrics (stable-ts alignment in ai-venv, the user's lines kept, unaligned words interpolated + flagged), Tap to sync (Space / Shift+Space, beat snap); Lyrics track, snap to beats, report; no vocal separation (Demucs weights research-only) | **Done** (2026-10-15) |
+| 13b | Advanced lyrics + translation: vocal separation (python-audio-separator, Mel-Band RoFormer; optional UVR DeEcho-DeReverb), vocal presence from the stem + a per-second strip in the dialog, Auto on the separated vocals (large-v3 option), synced-lyrics look-up (LRCLIB, opt-in) placed in the song and timed with stable-ts, translation (M2M100 1.2B / MADLAD-400 3B, CTranslate2 int8) in three layouts + re-translate one line, Noto fonts with per-script fallback, shaped Devanagari / Arabic (FriBiDi + raqm), Hindi in Latin letters | **Done** (2026-10-16) |
 
 ## Contents
 
@@ -38,6 +39,7 @@ The detailed notes of Phases 1-12, moved out of PROGRESS.md (verbatim, in the or
 - [Phase 11 (v1.3.0): what exists](#phase-11-v130-what-exists)
 - [Phase 12 (v2.0.0): what exists](#phase-12-v200-what-exists)
 - [Phase 13a: song lyrics captions](#phase-13a-song-lyrics-captions)
+- [Phase 13b: advanced lyrics + translation](#phase-13b-advanced-lyrics--translation)
 - [Decisions](#decisions)
 - [The user's reel ("Beat Sync Reel", project in projects\)](#the-users-reel-beat-sync-reel-project-in-projects)
 - [Fixed in the bug bash (Phase 8)](#fixed-in-the-bug-bash-phase-8)
@@ -270,7 +272,111 @@ The detailed notes of Phases 1-12, moved out of PROGRESS.md (verbatim, in the or
   phase's code or tests), so no copy was made. Its song (whole Video-78168.mp3, 0-23.455 s, as in the v6.1 export) analysed in memory:
   voice activity 0 % in all 24 seconds, 0 words with large-v3-turbo and small (CUDA, 2.3 / 1.3 s); without VAD Whisper invents one
   7-word segment at 17.8-23.3 s (20-40 ms words and one 5.4 s word, mean p 0.49) = hallucination. Instrumental: stopped there as the
-  user asked. `exports\lyrics demoeport.md` + `auto_mode_result.json` (no lyric text).
+  user asked. `exports\lyrics demo\report.md` + `auto_mode_result.json` (no lyric text).
+
+## Phase 13b: advanced lyrics + translation
+
+- **Diagnosis first** (`exports\lyrics demo\13b diagnosis\`): on Video-78168.mp3 the vocal-band energy share was 0.07-0.83 per
+  second. Whisper on short windows of the mix gave words that stayed the same across overlapping windows only at about 9-10.5,
+  12-13.5 and 16-21.5 s (leaning Spanish), and the user said the song has (Hindi) vocals all the way through. So separation is
+  needed: Silero VAD and Whisper on the full mix miss sung vocals under loud music.
+- **Separation, decisions**:
+  - A Spleeter 2-stem port was built first: the TF checkpoint was read without TensorFlow, the U-Net was ported to PyTorch and
+    exported to ONNX. It matched official Spleeter to -81 dB. Spleeter's weights are MIT per the authors' JOSS paper, and
+    `checksum.json` gives the SHA-256. The user then asked for **python-audio-separator** (MIT) instead, so the port was removed.
+  - Licenses checked:
+    - Mel-Band RoFormer vocals (Kimberley Jensen; owner's HF repo `KimberleyJSN/melbandroformer`): **MIT**, revision `ac9b0614`,
+      LFS SHA-256 pinned.
+    - Kim Vocal 2: no stated license.
+    - UVR DeEcho-DeReverb (FoxJoy): no stated license.
+    - htdemucs_ft: weights research-only, and it needs diffq, which is **CC BY-NC 4.0**.
+  - **User decision**: Mel-Band RoFormer is the only separator (no Fast / Best tiers until Balanced is judged). DeEcho-DeReverb is
+    allowed if it loads as weights only (it does: 689 tensors, `weights_only=True`), with the SHA-256 of the download pinned
+    (identical on both release hosts), and on by default only if it finds more correct words.
+- **Separation, how**:
+  - `ai_worker/separate.py`, op `separate`: a `Separator` subclass whose model lookup uses our verified files, a vendored RoFormer
+    config and the VR model parameters (`ai_worker/configs/`). Nothing is fetched at run time, and `TORCH_FORCE_WEIGHTS_ONLY_LOAD`
+    is set.
+  - GPU memory is capped at the budget. audio-separator chunks the song (8 s chunks).
+  - On the reel's song: peak 2.35 GB, 8.7 s after load. The DeEcho output is 10 ms short, with no shift: padded to the input.
+  - `audio-separator` is installed with `--no-deps`, without diffq / onnx-weekly / onnx2torch.
+- **Stems + presence** (`backend/app/stems.py`):
+  - The vocal stem of the clip's range (±1 s) is cached as `cache/<media>/stems/<key>.flac`. The key covers the range, the
+    models' SHA-256 and de-reverb.
+  - Settings shows the stems' size and can clear them (`DELETE /api/ai/stems-cache`).
+  - Vocal presence per second = the stem's level against the mix: 1 within 10 dB, 0 below -24 dB or under -60 dBFS.
+  - The dialog shows it as a strip (`lyr-presence`). Instrumental below 3 %.
+- **Auto on the stem**:
+  - Faster-whisper runs over the voiced seconds, in chunks of up to 25 s (gaps under 1.5 s joined), with no previous-text
+    conditioning, temperature fallback 0-0.8 and a short lyrics prompt (localised for hi/es/fr/de/pt). The 13a guard is kept.
+  - New accuracy option "Best for non-English" = **large-v3** (Systran/faster-whisper-large-v3, MIT, revision `edaa852e`,
+    SHA-256 pinned, 3.09 GB).
+  - When vocals are present but no words survive, the message suggests large-v3, the language, or paste / tap.
+  - Paste mode aligns to the stem too, and its voiced spans trim words that start in silence.
+- **Measurement** (Whisper large-v3, Hindi forced, product pipeline):
+  - RoFormer: 7 words, mean p 0.83, stability 1.0 with 25 s chunks.
+  - RoFormer + de-reverb: 8 words, p 0.91, stability 1.0.
+  - With 10 s chunks: 7 vs 8 words, stability 0.54 vs 0.82.
+  - Correctness can't be checked without the lyrics, so **de-reverb is an off-by-default option** (`DEREVERB_DEFAULT = False`).
+- **Synced lyrics** (`backend/app/lrc.py`, mode `lrc`):
+  - Tags come from ffprobe and are local only. `GET /api/lyrics/search` asks LRCLIB; only artist / title / album are sent, and
+    candidates come back without text.
+  - The chosen entry's synced LRC is fetched inside the job, and pasted LRC is accepted too. Nothing is stored except the
+    project's text clips.
+  - Parsing handles several tags per line, `[offset:]` and enhanced word tags.
+  - The clip's place in the song (for excerpts) is searched as an offset: correlation of vocal presence with "a line is being
+    sung", plus votes from a short Whisper pass (word text found in a line).
+  - The clip's lines are then timed with stable-ts on the stem. Lines the aligner can't place (most words flagged, or more than
+    2 s off) keep the LRC's line timing.
+- **Translation** (`ai_worker/translate.py`, `POST /api/lyrics/translate`):
+  - **M2M100 1.2B** (facebook, MIT, revision `7b361841`, 4.96 GB fp32) and **MADLAD-400 3B** (google, Apache-2.0, revision
+    `fa184c67`, 11.8 GB safetensors loaded as fp16).
+  - Both are verified, converted once on this computer to CTranslate2 int8 (M2M100: 1.25 GB, 22 s), and the originals deleted.
+  - The converter is subclassed (`dtype` -> `torch_dtype` for transformers 4.46). Only the tokenizer files are copied (copying
+    HF's `config.json` over CTranslate2's broke it once).
+  - M2M100 gets the source language (Whisper's, the user's, or a guess from the script). MADLAD uses `<2xx>`.
+  - Layouts (`text/edit.addLyrics`):
+    - original;
+    - translation only;
+    - two lines: a "Lyrics (translation)" track below, at 62 % size, with the same line timing, fading in as a line (no word
+      timings).
+  - Translated clips keep `text.translation` (source line, languages, model). Properties > "Re-translate this line".
+- **Scripts and fonts**:
+  - 15 Noto Sans fonts are bundled in `fonts\noto\` (OFL; google/fonts commit `1d0e46c7`, each checked against its git blob):
+    Latin, Devanagari, Arabic, Bengali, Tamil, Telugu, Gujarati, Gurmukhi, Kannada, Malayalam, Thai, Hebrew, SC, JP and KR.
+  - Pillow's raqm had no FriBiDi (`features.check("raqm")` False). GNU FriBiDi 1.0.17 (LGPL-2.1+, user approved, MSYS2 ucrt64
+    package matching the repo database SHA-256) is in `bin\fribidi\`.
+  - `app/fribidi.py` loads it before `PIL.ImageFont` is first imported (Pillow checks only then). Now raqm 0.10.5, HarfBuzz 14.2.1.
+  - `text.py`: a word the chosen font can't draw (fontTools cmap) uses the Noto font for its script, at the chosen font's weight.
+    Words that need shaping are one unit each, drawn with raqm. Lines whose first strong character is RTL are laid out right to
+    left.
+  - Lines in the chosen font keep the BASIC engine and the per-character layout. The Latin layouts in `shared/text_cases.json` are
+    byte-identical; only the cache keys changed (LAYOUT_VERSION 3).
+  - Each Hindi / Arabic / Hebrew word matches Pillow + raqm drawing it alone (mean difference 0-2.4/255, same ink box).
+  - 4 new parity cases: Devanagari reveal + pop, Devanagari + Latin typewriter, Arabic RTL caption colour, Arabic words in.
+  - The preview draws the backend's text images, so it is the same.
+  - Hindi in Latin letters (`app/translit.py`): indic-transliteration (MIT) IAST, with Hindi's word-final schwa dropped and
+    nasals as n (कमल -> kamal, हूँ -> hun). Optional diacritics.
+- **Tests**:
+  - `backend/tests/test_phase13b.py`:
+    - separation through the real worker in test mode, cached per range / settings, Settings size + clear;
+    - presence finds a voice 10-13 dB under a loud broadband bed where VAD on the mix doesn't;
+    - Auto / Paste use the stem;
+    - LRC parse / spans, placing an excerpt at +30 s (presence, and words + presence), the lrc mode end to end;
+    - translation through the worker + romanization + API checks;
+    - Devanagari / Arabic shaped like raqm, RTL order, Latin layout unchanged, mixed fallback;
+    - real models when installed: RoFormer + large-v3-turbo on a synthesized voice under loud music, and M2M100 / MADLAD round
+      trips.
+  - `frontend/src/lyrics/translate.test.ts`: layouts, timings, the presence strip, look-up conditions.
+  - `frontend/e2e/lyrics.spec.ts`: + Song lyrics -> Auto -> translate -> a two-line Lyrics track.
+- **Not finished**: the M2M100 re-download (needed after the config.json fix) completed, but its conversion and the MADLAD-400
+  download were stopped by Claude Code when the system ran low on memory. They were not restarted (the user decides). The real
+  M2M100 path last ran before the tokenizer / config fixes (it reached CTranslate2 and failed on the overwritten config).
+- **Demo** (`exports\lyrics demo\report_13b.md`, numbers only):
+  - Video-78168.mp3 0-23.455 s with separation: vocal presence 90 %, silent only around 14 s.
+  - large-v3 with Hindi keeps 7 words (8 with de-reverb), all in the first 7 s.
+  - turbo with language detection guesses English and keeps 0.
+  - So Whisper still can't transcribe this sung Hindi reliably. Look up / Paste / Tap give full lyrics.
 
 ## The user's reel ("Beat Sync Reel", project in projects\)
 
@@ -295,6 +401,8 @@ The detailed notes of Phases 1-12, moved out of PROGRESS.md (verbatim, in the or
 - Phase 12 (2026-10-15): the reel is photos only; unchanged (Auto-edit can use photos, but the reel is already hand-edited). Travel Dump v2: "fuel money" now rides the wrist cuff (drift 236 -> 27 px), both versions re-exported.
 
 - Phase 13a (2026-10-15): the "Beat Sync Reel v6.1" project was found missing from `projects\` (exports and the Golden Beat Trip template remain); its song is instrumental (0 % voice, no words), so no lyrics were added. Waiting for a song with vocals from a named folder.
+
+- Phase 13b (2026-10-16): the user says the song has Hindi vocals throughout. With separation the vocal presence is 90 % (silent only around 14 s), but Whisper keeps only ~8 reliable words, so no lyrics were added to any reel. Waiting for a folder with a Hindi and an English song for lyrics + translation tests.
 
 ## Fixed in the bug bash (Phase 8)
 

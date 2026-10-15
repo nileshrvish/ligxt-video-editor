@@ -145,7 +145,23 @@ def op_align_lyrics(ctx: Ctx, args: dict) -> dict:
     return align(ctx, args)
 
 
-OPS = {"probe": op_probe, "matte": op_matte, "segment": op_segment, "interp": op_interp, "track": op_track, "align_lyrics": op_align_lyrics}
+def op_separate(ctx: Ctx, args: dict) -> dict:
+    from separate import separate
+    return separate(ctx, args)
+
+
+def op_convert_mt(ctx: Ctx, args: dict) -> dict:
+    from translate import convert
+    return convert(ctx, args)
+
+
+def op_translate(ctx: Ctx, args: dict) -> dict:
+    from translate import translate
+    return translate(ctx, args)
+
+
+OPS = {"probe": op_probe, "matte": op_matte, "segment": op_segment, "interp": op_interp, "track": op_track, "align_lyrics": op_align_lyrics,
+       "separate": op_separate, "convert_mt": op_convert_mt, "translate": op_translate}
 
 
 def main() -> None:

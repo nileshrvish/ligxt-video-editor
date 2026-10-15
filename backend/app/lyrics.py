@@ -1,15 +1,14 @@
-"""Song lyrics captions from a music clip (Phase 13a).
+"""Song lyrics captions from a music clip (Phase 13a; vocal separation since Phase 13b).
 
-There is no vocal separation (Demucs' weights are research-only, so they were not added; see PROGRESS.md):
-everything works on the music clip's own audio (the full mix).
-
-- Voice activity: faster-whisper's Silero VAD (MIT) per second over the clip's used range: an *estimate* on
-  the full mix (instruments can trigger it, buried vocals can be missed).
-- Auto: faster-whisper with word timestamps + VAD on the range (+ margin), "small" or "large-v3-turbo" (MIT,
-  pinned in ai_models.CATALOG). Hallucination guard: low-probability words, unreliable segments and runs of
-  evenly spaced repeated words (what Whisper produced on the reel's song in Phase 6.1) are dropped. The
-  language is only forced when the user picks one.
-- Paste lyrics: the user's exact text aligned to the audio by stable-ts (MIT) in the AI worker
+- Vocals: the clip's range is separated first (`stems.py`: Mel-Band RoFormer, then UVR DeEcho-DeReverb when on),
+  and vocal presence per second is the vocal stem's level against the mix. Without the AI tools, or with the
+  separator off in Settings, everything falls back to the full mix with Silero VAD (Phase 13a: an estimate that
+  misses sung vocals under loud music).
+- Auto: faster-whisper ("small", "large-v3-turbo" or "large-v3", MIT, pinned in ai_models.CATALOG) on the vocal
+  stem, chunk by chunk over the seconds with vocals, no conditioning on previous text, temperature fallback and a
+  short lyrics prompt. Hallucination guard: low-probability words, unreliable segments and runs of evenly spaced
+  repeated words are dropped. The language is only forced when the user picks one.
+- Paste lyrics: the user's exact text aligned to the vocal stem (or the mix) by stable-ts (MIT) in the AI worker
   (`ai_worker/lyrics_align.py`), line breaks kept as caption lines; words that can't be aligned are
   interpolated between their neighbours and flagged.
 - Tap to sync happens in the editor (no AI).
@@ -32,6 +31,7 @@ from pydantic import BaseModel
 
 from . import ai_bridge, ai_models
 from . import motion as MO
+from . import stems as ST
 from .config import FFMPEG
 from .jobs import JobContext, jobs
 from .media import load_meta, original_path
@@ -43,7 +43,11 @@ MARGIN = 1.0  # seconds of context beyond the clip's ends (words outside the cli
 SR = 16000
 P_MIN = 0.35  # words below this probability are dropped (Auto)
 INSTRUMENTAL = 0.03  # voice activity below this share of the range = instrumental
-MODELS = {"small": "small", "large-v3-turbo": ai_models.LYRICS_MODEL}
+MODELS = {"small": "small", "large-v3-turbo": ai_models.LYRICS_MODEL, "large-v3": ai_models.LYRICS_MODEL_V3}
+TEMPERATURES = [0.0, 0.2, 0.4, 0.6, 0.8]  # fallback when a chunk decodes badly (compression / log-prob thresholds)
+PROMPTS = {None: "Song lyrics.", "hi": "गीत के बोल", "es": "Letra de la canción.",
+           "fr": "Paroles de la chanson.", "de": "Liedtext.", "pt": "Letra da música."}
+CHUNK_MAX = 25.0  # seconds per transcription chunk (Whisper's window is 30 s)
 
 
 # ---------------------------------------------------------------- the music clip
@@ -162,8 +166,8 @@ def guard(segments, src0: float) -> tuple[list[dict], dict]:
 # ---------------------------------------------------------------- the modes
 def _whisper(model_key: str, ctx=None, p0=0.0, p1=0.2):
     from . import captions as CAP
-    if model_key == "large-v3-turbo":
-        path = str(ai_models.ensure_model(ai_models.LYRICS_MODEL, ctx, p0, p1))
+    if model_key in ("large-v3-turbo", "large-v3"):
+        path = str(ai_models.ensure_model(MODELS[model_key], ctx, p0, p1))
     else:
         path = MODELS.get(model_key, "small")
     try:
@@ -172,28 +176,90 @@ def _whisper(model_key: str, ctx=None, p0=0.0, p1=0.2):
         return CAP._model(path, "cpu"), "cpu"
 
 
+def chunks(spans: list[list[float]], gap: float = 1.5, pad: float = 0.3, max_len: float = CHUNK_MAX) -> list[list[float]]:
+    """Voiced spans -> transcription chunks: close gaps under `gap` s, pad the ends, split anything longer than max_len."""
+    merged = []
+    for a, b in spans:
+        if merged and a - merged[-1][1] < gap:
+            merged[-1][1] = b
+        else:
+            merged.append([a, b])
+    out = []
+    for a, b in merged:
+        a, b = a - pad, b + pad
+        n = max(1, math.ceil((b - a) / max_len))
+        step = (b - a) / n
+        out += [[a + k * step, a + (k + 1) * step] for k in range(n)]
+    return out
+
+
+def _vad_voice(wav16: Path, s0: float, a: float, b: float) -> dict:
+    va = voice_activity(wav16, s0, a, b)
+    va["method"] = "vad"
+    return va
+
+
+def _stem_wav16(stem: dict, out: Path) -> None:
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-i", str(stem["path"]), "-ac", "1", "-ar", str(SR), str(out)], check=True, capture_output=True)
+
+
+def _sep_info(stem: dict | None) -> dict | None:
+    return {k: stem.get(k) for k in ("separator", "dereverb", "cached", "device", "steps")} if stem else None
+
+
 def run_auto(c, m: dict, model: str, language: str | None, ctx=None) -> dict:
     a, b = source_range(c)
     t0 = time.time()
+    stem = ST.vocal_stem(m, a, b, ctx, 0.02, 0.4)
     with tempfile.TemporaryDirectory(prefix="ligxt_lyr_") as tmp:
         wav = Path(tmp) / "song.wav"
-        s0 = extract(m, a, b, wav)
-        if ctx:
-            ctx.progress(0.05, "Listening for vocals")
-        va = voice_activity(wav, s0, a, b)
-        if os.environ.get("LIGXT_LYRICS_TEST"):  # automated tests without the speech model: VAD only
-            return {"words": [], "voice": va, "instrumental": va["share"] < INSTRUMENTAL, "guard": {}, "seconds": round(time.time() - t0, 2)}
-        wm, device = _whisper(model, ctx, 0.1, 0.3)
-        if ctx:
-            ctx.progress(0.35, "Transcribing the vocals")
-        segs, info = wm.transcribe(str(wav), language=language or None, word_timestamps=True, vad_filter=True,
-                                   condition_on_previous_text=False, temperature=0.0)
-        segs = list(segs)
-    words, g = guard(segs, s0)
+        if stem:
+            s0 = stem["s0"]
+            _stem_wav16(stem, wav)
+            voice = stem["presence"]
+        else:
+            s0 = extract(m, a, b, wav)
+            if ctx:
+                ctx.progress(0.05, "Listening for vocals")
+            voice = _vad_voice(wav, s0, a, b)
+        base = {"voice": voice, "separation": _sep_info(stem)}
+        if os.environ.get("LIGXT_LYRICS_TEST"):  # automated tests without the speech model: one placeholder word per voiced second
+            inst = voice["share"] < INSTRUMENTAL
+            fake = [] if inst else [{"text": f"w{k + 1}", "start": round(to_timeline(c, a + k + 0.1), 3), "end": round(to_timeline(c, a + k + 0.8), 3), "p": 0.9}
+                                    for k, p in enumerate(voice["perSecond"]) if p >= 0.25]
+            return {"words": fake, **base, "instrumental": inst, "guard": {}, "language": language or "en", "seconds": round(time.time() - t0, 2)}
+        if voice["share"] < INSTRUMENTAL:
+            return {"words": [], **base, "instrumental": True, "guard": {}, "seconds": round(time.time() - t0, 2)}
+        wm, device = _whisper(model, ctx, 0.4, 0.5)
+        from faster_whisper import decode_audio
+        audio = decode_audio(str(wav), sampling_rate=SR)
+        todo = chunks(ST.voiced_spans(voice, a)) if stem else [[s0, s0 + len(audio) / SR]]
+        segs, info = [], None
+        for k, (ca, cb) in enumerate(todo):
+            if ctx:
+                if ctx.cancelled():
+                    from .ffmpeg_utils import Cancelled
+                    raise Cancelled()
+                ctx.progress(0.5 + 0.45 * k / max(1, len(todo)), f"Transcribing the vocals {k + 1}/{len(todo)}")
+            lo, hi = max(0, int((ca - s0) * SR)), min(len(audio), int((cb - s0) * SR))
+            if hi - lo < SR // 4:
+                continue
+            got, info = wm.transcribe(audio[lo:hi], language=language or None, word_timestamps=True, vad_filter=not stem,
+                                      condition_on_previous_text=False, temperature=TEMPERATURES,
+                                      initial_prompt=PROMPTS.get(language, PROMPTS[None]))
+            segs += [(s0 + lo / SR, sg) for sg in got]
+    words, g = [], {"lowProbability": 0, "unreliableSegments": 0, "repeatedRuns": 0}
+    for off, sg in segs:
+        w, gg = guard([sg], off)
+        words += w
+        for kk in ("lowProbability", "unreliableSegments"):
+            g[kk] += gg[kk]
+    words, g["repeatedRuns"] = reject_repeats(sorted(words, key=lambda w: w["start"]))
     words = [w for w in words if a - 0.05 <= w["start"] < b]
-    inst = va["share"] < INSTRUMENTAL or not words
+    inst = voice["share"] < INSTRUMENTAL or (not words and not stem)
     out = [{"text": w["text"], "start": round(to_timeline(c, w["start"]), 3), "end": round(to_timeline(c, min(w["end"], b)), 3), "p": w["p"]} for w in words]
-    return {"words": out, "voice": va, "instrumental": inst, "guard": g, "language": info.language, "languageProb": round(float(info.language_probability), 3),
+    return {"words": out, **base, "instrumental": inst, "guard": g, "chunks": len(todo),
+            "language": info.language if info else language, "languageProb": round(float(info.language_probability), 3) if info else None,
             "device": device, "model": model, "seconds": round(time.time() - t0, 2)}
 
 
@@ -232,18 +298,24 @@ def run_align(c, m: dict, text: str, model: str, language: str | None, ctx=None)
     if not lines_txt:
         raise ValueError("Paste the lyrics first (one line per caption).")
     t0 = time.time()
+    stem = ST.vocal_stem(m, a, b, ctx, 0.02, 0.3)
     with tempfile.TemporaryDirectory(prefix="ligxt_lyr_") as tmp:
         wav = Path(tmp) / "song.wav"
-        s0 = extract(m, a, b, wav)
-        va = voice_activity(wav, s0, a, b)
+        if stem:
+            s0 = stem["s0"]
+            _stem_wav16(stem, wav)
+            va = dict(stem["presence"], spans=ST.voiced_spans(stem["presence"], a, 0.5))
+        else:
+            s0 = extract(m, a, b, wav)
+            va = _vad_voice(wav, s0, a, b)
         args = {"wav": str(wav), "lines": [" ".join(ln) for ln in lines_txt], "language": language, "device": ai_models.load_settings()["device"]}
         if os.environ.get("LIGXT_LYRICS_TEST"):
             args["mode"] = "test-align"
         else:
             if ai_models.ai_python() is None:
                 raise RuntimeError("Aligning pasted lyrics needs the AI tools (ai-venv), which are not installed. Use Tap to sync instead.")
-            args["model"] = str(ai_models.ensure_model(ai_models.LYRICS_MODEL, ctx, 0.05, 0.3))
-        res = ai_bridge.call("align_lyrics", args, progress=(lambda p, msg: ctx.progress(0.3 + 0.65 * p, msg)) if ctx else None,
+            args["model"] = str(ai_models.ensure_model(MODELS["large-v3" if model == "large-v3" else "large-v3-turbo"], ctx, 0.3, 0.35))
+        res = ai_bridge.call("align_lyrics", args, progress=(lambda p, msg: ctx.progress(0.35 + 0.6 * p, msg)) if ctx else None,
                              cancelled=ctx.cancelled if ctx else None)
     # worker times are seconds into the wav: -> source -> timeline; keep the user's words and lines
     lines = []
@@ -265,8 +337,62 @@ def run_align(c, m: dict, text: str, model: str, language: str | None, ctx=None)
         for w in ln:
             w["start"] = round(min(max(w["start"], ta), tb - 0.05), 3)
             w["end"] = round(min(max(w["end"], w["start"] + 0.05), tb), 3)
+    va.pop("spans", None)
     return {"lines": lines, "voice": va, "flagged": flagged, "device": res.get("device"), "seconds": round(time.time() - t0, 2),
+            "separation": _sep_info(stem),
             "language": res.get("language"), "instrumental": va["share"] < INSTRUMENTAL}
+
+
+def run_lrc(c, m: dict, lrc_text: str, model: str, language: str | None, ctx=None, source: dict | None = None) -> dict:
+    """Synced lyrics (LRC) -> the clip's lines: find where the clip sits in the song, then time the words with stable-ts
+    on the vocal stem; lines the aligner can't place keep the LRC's own line timing (words spread over the line)."""
+    from . import lrc as LRC
+    a, b = source_range(c)
+    t0 = time.time()
+    parsed = LRC.parse(lrc_text)
+    spans = LRC.line_spans(parsed, (source or {}).get("duration"))
+    if not spans:
+        raise ValueError("These lyrics have no time tags (not synced). Paste them as plain lyrics instead.")
+    stem = ST.vocal_stem(m, a, b, ctx, 0.02, 0.3)
+    if stem:
+        pres = stem["presence"]
+    else:
+        with tempfile.TemporaryDirectory(prefix="ligxt_lyr_") as tmp:
+            wav = Path(tmp) / "song.wav"
+            s0 = extract(m, a, b, wav)
+            pres = _vad_voice(wav, s0, a, b)
+    hint = []
+    if not os.environ.get("LIGXT_LYRICS_TEST") and pres["share"] >= INSTRUMENTAL:
+        if ctx:
+            ctx.progress(0.32, "Listening for a few words to find the place in the song")
+        r = run_auto(c, m, model, language, None)
+        hint = [dict(w, start=float(c.inPoint) + (w["start"] - float(c.start)) * float(c.speed or 1)) for w in r["words"]]
+    dur = float(m.get("duration") or b)
+    song_len = max(e for _, e, _ in spans)
+    loc = LRC.locate(spans, pres["perSecond"], a, hint, max_offset=max(0.0, song_len - (b - a)) if song_len > dur + 3 else 0.0)
+    if song_len <= dur + 3 and abs(loc["offset"]) > 0.0:
+        # the file is the whole song: the LRC's times are already the media's (only a small lead-in drift is allowed)
+        loc = LRC.locate(spans, pres["perSecond"], a, hint, max_offset=0.0) | {"note": "whole song"}
+    sel = LRC.lines_in_range(spans, loc["offset"], a, b)
+    if not sel:
+        raise ValueError("None of these lyrics fall inside this music clip (check the song, or the clip's range).")
+    if ctx:
+        ctx.progress(0.4, f"Timing {len(sel)} lines to the vocals")
+    al = run_align(c, m, "\n".join(x["text"] for x in sel), model, language, ctx)
+    lines, kept_lrc = [], 0
+    for ln, x in zip(al["lines"], sel):
+        ts, te = to_timeline(c, x["start"]), to_timeline(c, x["end"])
+        bad = sum(1 for w in ln if w.get("flag")) > len(ln) / 2 or abs(ln[0]["start"] - ts) > 2.0
+        if bad:  # the LRC's line timing, words spread evenly
+            step = max(0.05, (te - ts) / max(1, len(ln)))
+            ln = [dict(w, start=round(ts + k * step, 3), end=round(ts + (k + 1) * step, 3), flag=True) for k, w in enumerate(ln)]
+            kept_lrc += 1
+        lines.append(ln)
+    return {"lines": lines, "voice": al["voice"], "flagged": sum(1 for ln in lines for w in ln if w.get("flag")),
+            "lrc": {"offset": loc["offset"], "method": loc["method"], "score": loc["score"], "lines": len(sel), "lrcTimed": kept_lrc,
+                    "hintWords": len(hint), **({k: source[k] for k in ("id", "artist", "title") if k in source} if source else {})},
+            "separation": al.get("separation"), "device": al.get("device"), "language": al.get("language"),
+            "instrumental": False, "seconds": round(time.time() - t0, 2)}
 
 
 # ---------------------------------------------------------------- API
@@ -274,17 +400,21 @@ class LyricsBody(BaseModel):
     project: dict | None = None
     clipId: str | None = None
     playhead: float = 0.0
-    mode: str = "auto"  # auto | align
+    mode: str = "auto"  # auto | align | lrc
     model: str = "large-v3-turbo"
     language: str | None = None
     text: str | None = None
+    lrclibId: int | None = None  # lrc mode: fetched from LRCLIB inside the job (opt-in, needs internet)
+    lrc: str | None = None  # lrc mode: or LRC text supplied by the user
 
 
 @router.post("/api/projects/{pid}/lyrics")
 def lyrics(pid: str, body: LyricsBody):
     from .projects import load_project
-    if body.mode not in ("auto", "align"):
-        raise HTTPException(400, "mode must be auto or align (Tap to sync needs no server).")
+    if body.mode not in ("auto", "align", "lrc"):
+        raise HTTPException(400, "mode must be auto, align or lrc (Tap to sync needs no server).")
+    if body.mode == "lrc" and not body.lrclibId and not (body.lrc or "").strip():
+        raise HTTPException(400, "Choose synced lyrics from the search, or paste LRC text.")
     if body.model not in MODELS:
         raise HTTPException(400, f"Unknown model '{body.model}'.")
     project = Project.model_validate(body.project) if body.project else load_project(pid)
@@ -296,11 +426,30 @@ def lyrics(pid: str, body: LyricsBody):
         if body.mode == "auto":
             r = run_auto(c, m, body.model, body.language, ctx)
             nw = len(r["words"])
+            what = "vocal presence" if r["voice"].get("method") == "stem" else "voice activity (estimated on the full mix)"
             if r["instrumental"]:
-                r["message"] = ("No vocals in this part of the song (instrumental): voice activity "
-                                f"{r['voice']['share'] * 100:.0f} %, {nw} reliable words. Paste the lyrics or tap them in instead.")
+                r["message"] = ("No vocals in this part of the song (instrumental): "
+                                f"{what} {r['voice']['share'] * 100:.0f} %, {nw} reliable words. Paste the lyrics or tap them in instead.")
+            elif not nw:
+                r["message"] = (f"Vocals are there ({what} {r['voice']['share'] * 100:.0f} %) but no words could be recognised reliably. "
+                                "Try Best accuracy, pick the language, or paste / tap the lyrics.")
             else:
-                r["message"] = f"{nw} words found ({r.get('language')}, {r.get('device', '').upper()})."
+                r["message"] = f"{nw} words found ({r.get('language')}, {r.get('device', '').upper()}; {what} {r['voice']['share'] * 100:.0f} %)."
+        elif body.mode == "lrc":
+            from . import lrc as LRC
+            src = None
+            text = body.lrc or ""
+            if body.lrclibId:
+                ctx.progress(0.01, "Fetching the synced lyrics from LRCLIB")
+                src = LRC.fetch(body.lrclibId)
+                if src["instrumental"] or not src["synced"]:
+                    raise ValueError("LRCLIB has no synced lyrics for this entry (instrumental or plain text only).")
+                text = src["synced"]
+            r = run_lrc(c, m, text, body.model, body.language, ctx, src)
+            nw = sum(len(ln) for ln in r["lines"])
+            lr = r["lrc"]
+            r["message"] = (f"{nw} words in {len(r['lines'])} lines from the synced lyrics; the clip starts {lr['offset']:+.1f} s into the "
+                            f"lyrics' timing ({lr['method']}). {lr['lrcTimed']} line(s) kept the lyrics' own line timing.")
         else:
             r = run_align(c, m, body.text or "", body.model, body.language, ctx)
             nw = sum(len(ln) for ln in r["lines"])
@@ -311,5 +460,117 @@ def lyrics(pid: str, body: LyricsBody):
         ctx.message(r["message"])
         return r
 
-    job = jobs.submit("lyrics", "Song lyrics", run, queue="ai" if body.mode == "align" else "render", ref={"projectId": project.id})
+    job = jobs.submit("lyrics", "Song lyrics", run, queue="ai", ref={"projectId": project.id})  # separation uses the GPU worker
     return {"jobId": job.id}
+
+
+@router.get("/api/lyrics/tags/{media_id}")
+def lyrics_tags(media_id: str):
+    """Artist / title from the song file's tags (to prefill the synced-lyrics search). Local only."""
+    from . import lrc as LRC
+    m = load_meta(media_id)
+    if not m:
+        raise HTTPException(404, "Media not found.")
+    t = LRC.media_tags(str(original_path(m)))
+    if not t["title"]:
+        t["title"] = Path(m.get("name") or "").stem
+    return t
+
+
+@router.get("/api/lyrics/search")
+def lyrics_search(title: str, artist: str = "", album: str = ""):
+    """Opt-in: asks LRCLIB (internet) for synced lyrics; only the artist / title / album are sent. Returns candidates
+    without the lyrics text (that is fetched inside the lyrics job and only ends up in the project's text clips)."""
+    from . import lrc as LRC
+    if not title.strip():
+        raise HTTPException(400, "Type the song title.")
+    try:
+        return {"results": LRC.search(artist, title, album)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"LRCLIB could not be reached ({type(e).__name__}). Check the internet connection, or paste the lyrics.") from e
+
+
+# ---------------------------------------------------------------- translation (Phase 13b)
+# targets offered (both M2M100 and MADLAD-400 cover these)
+LANGUAGES = {"en": "English", "hi": "Hindi", "es": "Spanish", "fr": "French", "de": "German", "pt": "Portuguese", "it": "Italian",
+             "ru": "Russian", "ar": "Arabic", "ja": "Japanese", "ko": "Korean", "zh": "Chinese", "bn": "Bengali", "ta": "Tamil",
+             "ur": "Urdu", "mr": "Marathi", "gu": "Gujarati", "tr": "Turkish", "id": "Indonesian", "he": "Hebrew", "th": "Thai"}
+
+
+def guess_language(lines: list[str]) -> str:
+    """Source language from the script when nobody told us (M2M100 needs one): Devanagari -> hi, Arabic -> ar, ..."""
+    txt = " ".join(lines)
+    for lo, hi_, code in ((0x0900, 0x097F, "hi"), (0x0600, 0x06FF, "ar"), (0x0980, 0x09FF, "bn"), (0x0B80, 0x0BFF, "ta"),
+                          (0x0A80, 0x0AFF, "gu"), (0x0590, 0x05FF, "he"), (0x0E00, 0x0E7F, "th"), (0x3040, 0x30FF, "ja"),
+                          (0xAC00, 0xD7AF, "ko"), (0x4E00, 0x9FFF, "zh"), (0x0400, 0x04FF, "ru")):
+        if any(lo <= ord(ch) <= hi_ for ch in txt):
+            return code
+    return "en"
+
+
+class TranslateBody(BaseModel):
+    lines: list[str]
+    source: str | None = None
+    target: str
+    model: str = "good"  # good = M2M100 1.2B, best = MADLAD-400 3B
+    script: str = "native"  # Hindi output: native (Devanagari) | roman
+
+
+def run_translate(lines: list[str], source: str | None, target: str, model: str, script: str = "native", ctx=None) -> dict:
+    from . import translit
+    t0 = time.time()
+    src = source or guess_language(lines)
+    mid = ai_models.TRANSLATION_MODELS[model]
+    args = {"lines": lines, "source": src, "target": target, "kind": ai_models.CATALOG[mid]["convert"]["kind"],
+            "device": ai_models.load_settings()["device"]}
+    if os.environ.get("LIGXT_LYRICS_TEST"):
+        args["mode"] = "test-translate"
+    else:
+        if ai_models.ai_python() is None:
+            raise RuntimeError("Translation needs the AI tools (ai-venv), which are not installed.")
+        args["model"] = str(ai_models.ensure_model(mid, ctx, 0.0, 0.5) / ai_models.CATALOG[mid]["convert"]["out"])
+    res = ai_bridge.call("translate", args, progress=(lambda p, msg: ctx.progress(0.5 + 0.48 * p, msg)) if ctx else None,
+                         cancelled=ctx.cancelled if ctx else None)
+    out = res["lines"]
+    if target == "hi" and script == "roman":
+        out = [translit.romanize(x) for x in out]
+    return {"lines": out, "source": src, "target": target, "model": model, "modelName": ai_models.CATALOG[mid]["name"],
+            "device": res.get("device"), "seconds": round(time.time() - t0, 2)}
+
+
+@router.post("/api/lyrics/translate")
+def lyrics_translate(body: TranslateBody):
+    if body.target not in LANGUAGES:
+        raise HTTPException(400, "Unsupported target language.")
+    if body.model not in ai_models.TRANSLATION_MODELS:
+        raise HTTPException(400, "model must be good or best.")
+    lines = [str(x).strip() for x in body.lines]
+    if not any(lines):
+        raise HTTPException(400, "Nothing to translate.")
+
+    def run(ctx: JobContext) -> dict:
+        r = run_translate(lines, body.source, body.target, body.model, body.script, ctx)
+        r["message"] = f"{len(lines)} line(s) translated {r['source']} -> {r['target']} ({r['modelName']}, {str(r.get('device') or '').upper()})."
+        ctx.message(r["message"])
+        return r
+
+    job = jobs.submit("translate", "Translate lyrics", run, queue="ai")
+    return {"jobId": job.id}
+
+
+class RomanizeBody(BaseModel):
+    lines: list[str]
+    diacritics: bool = False
+
+
+@router.post("/api/lyrics/romanize")
+def lyrics_romanize(body: RomanizeBody):
+    """Hindi (Devanagari) in Latin letters; other text unchanged. No AI, instant."""
+    from . import translit
+    return {"lines": [translit.romanize(x, body.diacritics) for x in body.lines]}
+
+
+@router.get("/api/lyrics/languages")
+def lyrics_languages():
+    return {"languages": LANGUAGES, "models": {k: {"id": v, "name": ai_models.CATALOG[v]["name"], "installed": ai_models.is_installed(v),
+                                                 "downloadBytes": ai_models.download_size(v)} for k, v in ai_models.TRANSLATION_MODELS.items()}}

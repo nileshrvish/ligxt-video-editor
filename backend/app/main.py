@@ -12,6 +12,7 @@ import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from . import fribidi  # noqa: F401,I001  (before anything imports PIL.ImageFont: shaped Indic / Arabic text)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles

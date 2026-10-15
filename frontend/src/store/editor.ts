@@ -120,7 +120,8 @@ interface EditorState {
   /** Insert transcribed words as caption clips on a new "Captions" track. */
   insertCaptions: (words: TE.TimedWord[], style: Partial<TextSpec>, position: { x: number; y: number }) => number;
   /** Song lyrics lines onto a "Lyrics" track; `beatsEvery` = also snap each line's words to the beats (syncWordsToBeats). */
-  insertLyrics: (lines: TE.TimedWord[][], style: Partial<TextSpec>, position: { x: number; y: number }, beats?: number[] | null, beatsEvery?: 0.5 | 1 | 2) => number;
+  insertLyrics: (lines: TE.TimedWord[][], style: Partial<TextSpec>, position: { x: number; y: number }, beats?: number[] | null, beatsEvery?: 0.5 | 1 | 2,
+    tr?: TE.LyricsTranslation | null, layout?: TE.LyricsLayout) => number;
   /** Split the selected main-track clip at the playhead and hold that frame for `seconds`. */
   freezeFrameAtPlayhead: (seconds?: number) => void;
   copyFilters: (clipId: string) => void;
@@ -203,14 +204,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     return id;
   },
 
-  insertLyrics: (lines, style, position, beats, beatsEvery = 1) => {
+  insertLyrics: (lines, style, position, beats, beatsEvery = 1, tr, layout = "original") => {
     let n = 0;
     get().commit((d) => {
-      const r = TE.addLyrics(d, lines, style, position);
-      n = r.ids.length;
-      if (beats && beats.length > 1) {
-        const tr = d.tracks.find((t) => t.id === r.trackId)!;
-        for (const c of tr.clips) TE.syncWordsToBeats(c, beats, beatsEvery);
+      const r = TE.addLyrics(d, lines, style, position, tr, layout);
+      const lyr = d.tracks.find((t) => t.id === r.trackId)!;
+      n = lyr.clips.length;
+      if (beats && beats.length > 1 && (!tr || layout !== "translation")) {
+        for (const c of lyr.clips) TE.syncWordsToBeats(c, beats, beatsEvery);
       }
     });
     return n;

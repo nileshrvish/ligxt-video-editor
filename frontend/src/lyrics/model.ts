@@ -3,7 +3,7 @@ import { clipDuration } from "../motion/motion";
 import type { TimedWord } from "../text/edit";
 import type { Clip, Project } from "../types";
 
-export type LyricsMode = "auto" | "paste" | "tap";
+export type LyricsMode = "auto" | "paste" | "lookup" | "tap";
 export type Source = "speech" | "lyrics";
 
 export interface MusicClipChoice { clip: Clip; label: string; skip: string | null }
@@ -24,16 +24,34 @@ export function musicClips(p: Project, names: Record<string, string>, playhead: 
 }
 
 /** What the dialog's main button does / whether it can run. */
-export function canRun(source: Source, mode: LyricsMode, opts: { hasClip: boolean; text: string; taps: number }): { ok: boolean; why?: string } {
+export function canRun(source: Source, mode: LyricsMode, opts: { hasClip: boolean; text: string; taps: number; lookupId?: number | null; lrc?: string }): { ok: boolean; why?: string } {
   if (source === "speech") return { ok: true };
   if (!opts.hasClip) return { ok: false, why: "Add the song on a music track first." };
   if (mode === "paste" && !opts.text.trim()) return { ok: false, why: "Paste the lyrics (one line per caption)." };
+  if (mode === "lookup" && !opts.lookupId && !(opts.lrc ?? "").trim()) return { ok: false, why: "Search and pick synced lyrics, or paste LRC text." };
   if (mode === "tap" && !opts.taps) return { ok: false, why: "Play the song and tap Space at the start of each line." };
   return { ok: true };
 }
 
 /** After an Auto run found no vocals, these are offered instead. */
 export const instrumentalAlternatives: LyricsMode[] = ["paste", "tap"];
+
+/** The dialog's vocal-presence strip: one cell per second of the clip's range, on the timeline. */
+export interface PresenceCell { t0: number; t1: number; p: number; level: "none" | "low" | "mid" | "high" }
+
+export function presenceCells(perSecond: number[], clip: { start: number; speed?: number }): PresenceCell[] {
+  const sp = clip.speed || 1;
+  return perSecond.map((p, k) => ({
+    t0: +(clip.start + k / sp).toFixed(3), t1: +(clip.start + (k + 1) / sp).toFixed(3), p,
+    level: p < 0.1 ? "none" : p < 0.4 ? "low" : p < 0.75 ? "mid" : "high",
+  }));
+}
+
+/** "vocals heard in 19 of 24 s" style summary. */
+export function presenceSummary(perSecond: number[]): string {
+  const voiced = perSecond.filter((p) => p >= 0.4).length;
+  return `vocals in ${voiced} of ${perSecond.length} s`;
+}
 
 export function splitLyrics(text: string): string[][] {
   return text.replace(/\r/g, "").split("\n").map((l) => l.trim().split(/\s+/).filter(Boolean)).filter((l) => l.length);

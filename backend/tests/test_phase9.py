@@ -265,7 +265,8 @@ def test_without_ai_tools(client, media, monkeypatch, tmp_path):
 
 def test_model_manager_checksums(client, monkeypatch, tmp_path):
     for mid, spec in ai_models.CATALOG.items():
-        assert spec["license"] in ("MIT", "Apache-2.0", "BSD-3-Clause") and spec["files"]
+        # permissive, or explicitly approved by the user (recorded in the catalog entry)
+        assert (spec["license"] in ("MIT", "Apache-2.0", "BSD-3-Clause") or spec.get("userApproved")) and spec["files"]
         assert all(len(f["sha256"]) == 64 and f["size"] > 0 for f in spec["files"])
     good = tmp_path / "weights.bin"
     good.write_bytes(b"ligxt" * 1000)
