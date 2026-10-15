@@ -1,6 +1,6 @@
 """Motion tracking: follow a face or any object through a clip (see follow.py for the data and maths).
 
-Trackers (chosen by measuring accuracy and speed on the user's clips, see PROGRESS.md Phase 11):
+Trackers (chosen by measuring accuracy and speed on the user's clips, see docs/HISTORY.md, Phase 11):
 - face: OpenCV YuNet on every frame (models/face_detection_yunet_2023mar.onnx, MIT) + association to the
   chosen face (predicted position, size and colour gates); short gaps are bridged with optical flow,
   longer ones held as "lost" until the same face is found again. Angle from the eye line.
