@@ -5,15 +5,17 @@ demos, the reel's history) are in [docs/HISTORY.md](docs/HISTORY.md).
 
 ## Current state
 
-- **Version 2.0.0** (2026-10-15, tag `v2.0.0`). Phases 1-12 are done; Phase 12 was the last of this set.
+- **Version 2.0.0** (2026-10-15, tag `v2.0.0`). Phases 1-12 are done. **Phase 13a (song lyrics captions)** is done (2026-10-15,
+  no tag requested): Captions > Source "Song lyrics" with Auto (Whisper), Paste lyrics (stable-ts alignment) and Tap to sync.
 - What exists: timeline editor (trim/split/ripple, snapping, markers), canvas preview matching the export, transitions (xfade + whip),
   colour (presets, LUTs, effects, adjustment layers), motion (keyframes, Ken Burns, punch/shake), speed ramps, audio (ducking, SFX),
   text + auto-captions, export presets, style templates, Cutout (AI matting / SAM objects), AI slow motion (RIFE), motion tracking
-  (follow, tracked blur, auto-reframe) and Auto-edit from raw footage. See README.md for how to use it.
-- Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (114) and `cd frontend; npm test` (123); headless UI tests `cd frontend; npm run e2e` (5). The AI tools: `ai-venv` (built by setup.ps1).
+  (follow, tracked blur, auto-reframe), Auto-edit from raw footage and song-lyrics captions. See README.md for how to use it.
+- Tests: `cd backend; ..\.venv\Scripts\python.exe -m pytest -q tests` (121) and `cd frontend; npm test` (127); headless UI tests `cd frontend; npm run e2e` (6). The AI tools: `ai-venv` (built by setup.ps1).
 - Git: commit to `master` and push after each tested phase or fix.
 - Stack: FastAPI backend (Python 3.11 `.venv`), React + Vite + TS frontend, ffmpeg 8.1.1 with NVENC, RTX 4050 (6 GB). AI models run
-  in `ai-venv` through `ai_worker/` (BiRefNet, SAM 2.1, RIFE); YuNet and VitTrack run in the main environment.
+  in `ai-venv` through `ai_worker/` (BiRefNet, SAM 2.1, RIFE, stable-ts lyric alignment); YuNet, VitTrack and faster-whisper
+  (captions, lyrics Auto mode) run in the main environment.
 
 ## Usage rules (set by the user in Phase 10; apply to every phase)
 
@@ -22,7 +24,7 @@ demos, the reel's history) are in [docs/HISTORY.md](docs/HISTORY.md).
 - Test with automated tests only: pytest and frontend unit tests; a UI flow that needs checking gets a headless Playwright script (no screenshots unless a failure needs debugging).
 - Check video results by extracting frames with ffmpeg and measuring them in scripts, not by viewing the app.
 - Leave the visual and click-through checks to the user, with a clear test checklist.
-- Use only media from `C:\Users\niles\ligxt-test-media` and the projects the user names; don't search other folders. If that folder is missing or empty, stop and say so. (Phases 10-12: the folder doesn't exist; the user allowed the Travel Dump project's media, plus `ligxt-test-media` if it ever exists.)
+- Use only media from `C:\Users\niles\ligxt-test-media` and the projects the user names; don't search other folders. If that folder is missing or empty, stop and say so. (Phases 10-13a: the folder doesn't exist; the user allowed the Travel Dump project's media and, for 13a, the Beat Sync Reel's song, plus `ligxt-test-media` if it ever exists.)
 - Playwright (headless, a frontend dev dependency) is the tool for UI flows (`frontend/e2e`, `npm run e2e`).
 
 ## AI feature rules (apply to every AI phase)
@@ -48,6 +50,8 @@ Set by the user in Phase 9; every later AI feature follows them.
 - **Windows:** replacing `meta.json` / `project.json` while another request reads it fails ("Access is denied"): use `fsutil.replace_retry`.
   The AI worker polls stdin with `PeekNamedPipe` (a blocking read deadlocks DLL loading). ffmpeg `drawtext` needs an explicit `fontfile=`.
 - **PowerShell 5.1:** `nativeExe | Select-Object -First 1` sets a non-zero `$LASTEXITCODE`; capture the output first.
+- **ai-venv packages:** install `torchaudio==2.8.0` from the cu128 index before anything that needs it (stable-ts), or pip pulls a
+  newer torchaudio that breaks torch 2.8.0+cu128. stable-ts `align()` with faster-whisper needs an explicit language (detect it first).
 - **Working in this repo:** long or backslash-heavy bash heredocs break; write patch scripts to a file and run them with
   `.venv\Scripts\python.exe`. Docs patches: assert every replacement (a silent `str.replace` once dropped an update).
 - **Secrets:** the git remote URL holds a GitHub token: never print it; redact push output with `sed -E 's#https://[^@]*@#https://***@#g'`.
@@ -60,6 +64,10 @@ Set by the user in Phase 9; every later AI feature follows them.
 ## Known issues
 
 - Beat detection tested on synthetic click tracks and one real song (steady 119.6 BPM grid).
+- Lyrics: **no vocal separation.** Demucs' code is MIT but its weights are research-only (maintainer, demucs issue #327); Spleeter's
+  model license is unstated. The user chose "no separation for now", so Whisper and the voice-activity estimate (Silero VAD) run on
+  the full mix: loud music can hide vocals (VAD then says instrumental) and Auto mode is less reliable than on speech. Paste and Tap
+  always work. Lyrics can't be timed on reversed, frozen or speed-ramped music clips (the dialog says so).
 - Bug bash (Chrome, 1366x768-class window), not fixed:
   - Built-in template cards start on the plain "1" placeholder card (the preview animates on hover).
   - Exports made before v1.0 can't be re-exported from Recent exports (no recorded settings; the button explains).
@@ -81,6 +89,9 @@ Set by the user in Phase 9; every later AI feature follows them.
 - **Beat Sync Reel** (12 photos + `Video-78168.mp3`): the user wants it enhanced after every phase to a pro, viral standard. Latest:
   "Beat Sync Reel v6.1" (+ Instagram export) and the "Beat Sync Reel v7 test" copy (text behind the subject). Photos only, so the
   slow-motion, tracking and auto-edit phases left it unchanged. The template "Golden Beat Trip" was saved from it.
+  On 2026-10-15 the "Beat Sync Reel v6.1" project (`d15f73526286`) was found missing from `projects\` (not removed by Phase 13a
+  code or tests); its exports and the template remain. Its song is instrumental: no lyrics demo (`exports\lyrics demo
+eport.md`).
 - **Travel Dump** (the user's project; original edit unchanged) and **Travel Dump v2** (rebuilt in Phase 11: slam ramps, tracked titles,
   text behind the peak and the neon portrait, auto-reframe; Phase 12: "fuel money" rides the wrist cuff). Exports `Travel Dump v2.mp4`
   + `Travel Dump v2 Instagram.mp4`; breakdown in `exports\travel dump v2 comparison\`.
@@ -88,7 +99,8 @@ Set by the user in Phase 9; every later AI feature follows them.
 
 ## Next
 
-- Phase 12 was the last phase of this set (v2.0.0): waiting for the user's next plans.
+- Phase 13a done: waiting for the user to name a song (or a section) with vocals, from a named folder, for the lyrics demo, and to
+  confirm whether "Beat Sync Reel v6.1" was deleted on purpose.
 - If the user sends the Phase 8 bug / friction list (still empty), fix those first.
 - At the start of a phase: check whether `C:\Users\niles\ligxt-test-media` exists now (it never has).
 - Open question for the user: add RobustVideoMatting (GPL-3.0) for comparison? (Not used without their OK.)

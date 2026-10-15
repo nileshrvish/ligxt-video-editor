@@ -98,6 +98,9 @@ def unload() -> None:
     itp = sys.modules.get("interp")
     if itp is not None:
         itp.unload_rife()
+    la = sys.modules.get("lyrics_align")
+    if la is not None:
+        la.unload()
     try:
         import torch
         if torch.cuda.is_available():

@@ -181,6 +181,11 @@ Select a video clip and open **Properties > Motion tracking**.
 - **Beat-synced words**: *♪ Sync words to the beat* puts one word on each beat (or half / every second beat) of the music under the text; with the *Reveal + pop* highlight each word appears exactly on its beat.
 - **Animations**: In and Out separately: fade, slide (from below/above/left/right), pop/scale, typewriter, word by word, each with a duration and easing. Position, scale, rotation and opacity take ◆ keyframes like clips.
 - **Auto-captions** (`CC Captions`): speech on the video and audio tracks is transcribed locally with faster-whisper (GPU when available, free). The first run downloads the model (about 460 MB for "small") into `models\whisper`. Captions land on a "Captions" track as short segments with word timings, placed above the Reels caption area. Highlight styles: karaoke pop, karaoke colour, reveal as spoken. Editing a caption's text keeps the timings; splitting a caption splits its words. If there is no speech, you are told so and nothing is added.
+- **Song lyrics** (`CC Captions` > Source: *Song lyrics*): captions for a song on the music track. Pick the song (default: the one under the playhead) and a mode:
+  - *Auto*: Whisper listens for the vocals (Accuracy *Fast (small)* or *Best (large-v3-turbo)*, 1.6 GB, downloaded on first use). Words the model isn't sure of, and Whisper's typical made-up repeats ("la la la" at an even pace), are dropped.
+  - *Paste lyrics*: paste the words, one caption line per line; they are timed to the song (stable-ts, needs the AI tools). Words that can't be placed are spread between their neighbours and listed as low-confidence.
+  - *Tap to sync*: play the song and press **Space** at the start of each line (**Shift+Space** at the start of a word, **Backspace** to undo); optionally snap each tap to the nearest beat (within 80 ms). No AI.
+  The lines land on a "Lyrics" track with the caption styles above; *Snap words to beats* lines each word up with a beat. The dialog reports words, lines, voice activity and low-confidence words. If it hears no singing it says "No vocals in this part of the song (instrumental)" and offers Paste and Tap. There is no vocal separation (the free separation models' weights are research-only), so very loud music can hide the vocals. Reversed, frozen and speed-ramped music clips can't be timed.
 - **Safe areas**: the preview warns when text or a detected face sits under the Reels header, the caption area or the buttons (badge next to *Safe areas*; click a warning to jump there). Faces are found on import (OpenCV YuNet, `models\face_detection_yunet_2023mar.onnx`, MIT).
 - **Extend canvas** (photos, Properties > Frame): fills around the photo with a blurred, colour-matched extension, so a photo can be moved or zoomed out without showing its edges.
 
@@ -243,15 +248,17 @@ The project format is documented in `backend\app\models.py`. The ffmpeg graph bu
 | BiRefNet dynamic (matting) | MIT | 424 MB | huggingface.co/ZhengPeng7/BiRefNet_dynamic-matting |
 | RIFE 4.26 (AI slow motion), hzwer/Practical-RIFE | MIT | 23 MB download, 24.6 MB on disk | huggingface.co/hzwer/RIFE (revision 01fdc7e9; only `flownet.pkl` is kept; the network code is included in `ai_worker\rife_net.py`, so no downloaded code is run) |
 | SAM 2.1 small (click to select), Meta | Apache-2.0 | 176 MB | github.com/facebookresearch/sam2 (code pinned to commit 2b90b9f5, checkpoint from dl.fbaipublicfiles.com) |
+| Whisper large-v3-turbo, CTranslate2 (song lyrics, *Best*) | MIT | 1.62 GB | huggingface.co/dropbox-dash/faster-whisper-large-v3-turbo (revision 0a363e91; formerly mobiuslabsgmbh; converted from openai/whisper-large-v3-turbo, MIT) |
+| stable-ts 2.19.1 (lyrics alignment), faster-whisper 1.2.1, openai-whisper (ai-venv) | MIT | | PyPI (with tiktoken MIT, numba / llvmlite BSD-2, onnxruntime MIT, av BSD-3, protobuf BSD-3, flatbuffers Apache-2.0, more-itertools MIT) |
 | PySceneDetect 0.6.4 (shot detection for Auto-edit, runs in the main environment) | BSD-3-Clause | 1 MB | PyPI `scenedetect` (with `platformdirs`, MIT) |
-| PyTorch, torchvision | BSD-3-Clause | ~3 GB (ai-venv) | pytorch.org |
+| PyTorch, torchvision (torchaudio 2.8.0: BSD-2-Clause) | BSD-3-Clause | ~3 GB (ai-venv) | pytorch.org |
 | transformers, safetensors, timm, kornia | Apache-2.0 | | PyPI |
 | einops, hydra-core, iopath | MIT | | PyPI |
 | omegaconf, antlr4 runtime, portalocker, numpy | BSD-3-Clause | | PyPI |
 
-Not used: **RobustVideoMatting** is GPL-3.0 (its weights carry no separate license), so it was left out and not run; it can be added if you approve its license. **MODNet** (Apache-2.0) publishes its weights only on Google Drive, which can't be checksum-pinned reliably.
+Not used: **Demucs** vocal separation (code MIT, but its weights are "provided only for scientific purposes", per its maintainer) and **Spleeter** (model license not stated). Not used: **RobustVideoMatting** is GPL-3.0 (its weights carry no separate license), so it was left out and not run; it can be added if you approve its license. **MODNet** (Apache-2.0) publishes its weights only on Google Drive, which can't be checksum-pinned reliably.
 
-**Disk space**: the AI models take 1.6 GB (`models\ai`; delete unused ones in Settings), the speech model 1.9 GB (`models\whisper`, downloaded on first use of captions), YuNet and VitTrack under 1 MB. Auto-edit's analysis cache is about 60 KB per clip (`cache\<media>\autoedit`); proxies, slow-motion renders and cutouts live in `cache\` too (Settings > clear cutout cache; Home > Media cleanup).
+**Disk space**: the AI models take 1.6 GB (`models\ai`; 3.2 GB with the lyrics model; delete unused ones in Settings), the speech model 1.9 GB (`models\whisper`, downloaded on first use of captions), YuNet and VitTrack under 1 MB. Auto-edit's analysis cache is about 60 KB per clip (`cache\<media>\autoedit`); proxies, slow-motion renders and cutouts live in `cache\` too (Settings > clear cutout cache; Home > Media cleanup).
 
 `stickers\` holds stickers drawn from simple shapes by `scripts\make_stickers.py` (no third-party artwork), released under **CC0 1.0** (`stickers\LICENSE.md`).
 

@@ -244,7 +244,7 @@ export default function Timeline() {
           <Icon name="sparkles" size={14} /> Adjustment
         </button>
         <TextMenu />
-        <button className="btn ghost sm" onClick={() => setCaptionsOpen(true)} title="Auto-captions: transcribe speech with faster-whisper (local, GPU)">
+        <button className="btn ghost sm" data-testid="captions-btn" onClick={() => setCaptionsOpen(true)} title="Auto-captions: speech on the video/audio tracks, or song lyrics from the music track (local, GPU)">
           CC Captions
         </button>
         {captionsOpen && <CaptionsDialog onClose={() => setCaptionsOpen(false)} />}

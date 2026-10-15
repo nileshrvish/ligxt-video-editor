@@ -7,3 +7,6 @@ einops==0.8.1
 kornia==0.8.1
 safetensors==0.8.0
 numpy==2.4.6
+# song lyrics (Phase 13a): align pasted lyrics (stable-ts, MIT) with faster-whisper (MIT)
+stable-ts==2.19.1
+faster-whisper==1.2.1

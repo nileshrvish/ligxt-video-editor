@@ -15,6 +15,7 @@ ROOT = HERE.parents[1]
 os.environ["LIGXT_DATA_DIR"] = tempfile.mkdtemp(prefix="ligxt-e2e-")
 os.environ["LIGXT_AI_PYTHON"] = sys.executable  # the AI worker runs with this Python...
 os.environ["LIGXT_SLOWMO_TEST"] = "1"  # ...and "AI smooth" blends through it (no GPU work in UI tests)
+os.environ["LIGXT_LYRICS_TEST"] = "1"  # lyrics: voice activity only (Auto), the numpy test aligner (Paste)
 sys.path.insert(0, str(ROOT / "backend"))
 
 import cv2  # noqa: E402

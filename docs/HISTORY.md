@@ -19,6 +19,7 @@ The detailed notes of Phases 1-12, moved out of PROGRESS.md (verbatim, in the or
 | 10 | AI slow motion: RIFE 4.26 frame interpolation (2x/4x/8x, smooth to 60 fps, frame-rate conversion), per-clip Slow-mo quality (repeat / blending / AI smooth), speed ramps incl. slow-mo into the drop, Cutout alignment, scene cuts, static-area lock, motion warnings, cached preview + full-res export, templates; motion-blur matte fix; Slow-mo Demo + Travel Dump reel | **Done** (2026-10-13), v1.2.0 |
 | 11 | Motion tracking: face (YuNet), box (VitTrack) and AI click (SAM 2.1) trackers both ways with fixes + re-track, follow (text, stickers, overlays) with position/scale/rotation/smoothing/safe areas, tracked blur/pixelate/grade regions, auto-reframe, templates (main face); Playwright UI tests; Tracking Demo + Travel Dump v2 | **Done** (2026-10-14), v1.3.0 |
 | 12 | Auto-edit from raw footage: analysis (PySceneDetect shots, sharpness, exposure, faces, motion, steadiness, composition, duplicates, unusable moments), style drafts (Energetic / Cinematic / Chill, beat-sync around the drop or a template), review (swap, lock, exclude, regenerate), project + report; demo in three styles vs Travel Dump v2 | **Done** (2026-10-15), v2.0.0 |
+| 13a | Song lyrics captions: Captions > Source "Song lyrics" on a music clip; Auto (faster-whisper small or Best = large-v3-turbo, VAD, hallucination guard), Paste lyrics (stable-ts alignment in ai-venv, the user's lines kept, unaligned words interpolated + flagged), Tap to sync (Space / Shift+Space, beat snap); Lyrics track, snap to beats, report; no vocal separation (Demucs weights research-only) | **Done** (2026-10-15) |
 
 ## Contents
 
@@ -36,6 +37,7 @@ The detailed notes of Phases 1-12, moved out of PROGRESS.md (verbatim, in the or
 - [Phase 10 (v1.2.0): what exists](#phase-10-v120-what-exists)
 - [Phase 11 (v1.3.0): what exists](#phase-11-v130-what-exists)
 - [Phase 12 (v2.0.0): what exists](#phase-12-v200-what-exists)
+- [Phase 13a: song lyrics captions](#phase-13a-song-lyrics-captions)
 - [Decisions](#decisions)
 - [The user's reel ("Beat Sync Reel", project in projects\)](#the-users-reel-beat-sync-reel-project-in-projects)
 - [Fixed in the bug bash (Phase 8)](#fixed-in-the-bug-bash-phase-8)
@@ -233,6 +235,43 @@ The detailed notes of Phases 1-12, moved out of PROGRESS.md (verbatim, in the or
 - **Travel Dump v2 follow-up**: "fuel money" now follows the rigid wrist cuff (tracked, with its rotation) instead of the opening hand: drift against the palm under it 236 px RMS -> 27 px; both versions re-exported (all checks still pass).
 - **Tests**: `backend/tests/test_phase12.py` (6: shots / black / blur / motion / duplicates on synthetic clips, caching + cancel, drafts on beats with the strongest shot on the drop and no back-to-back repeats, locks / excludes / styles, create + export, template mode), `frontend/src/autoedit/model.test.ts` (2), `frontend/e2e/autoedit.spec.ts` (2: folder import; analyse -> review lock/swap/regenerate/style -> create -> open).
 
+## Phase 13a: song lyrics captions
+
+- **Why**: Auto-captions skips music tracks, so a project whose only sound is a song had nothing to caption, and Phase 6.1 found
+  Whisper hears no vocals in the full mix of Video-78168.mp3.
+- **Licenses / decision**: Demucs (htdemucs) code is MIT but the maintainer states the weights are "not covered by the MIT license"
+  and are for scientific purposes only (facebookresearch/demucs#327; trained on MUSDB); the HF mirror's MIT tag has no owner
+  confirmation. Spleeter's model license is not stated. The user chose **no separation for now**: no `separate` op, no stems cache;
+  everything runs on the full mix. Used: faster-whisper large-v3-turbo (MIT; `dropbox-dash/faster-whisper-large-v3-turbo`, the renamed
+  mobiuslabsgmbh repo, revision `0a363e91...`, 5 files pinned by SHA-256, 1.62 GB, `ai_models.LYRICS_MODEL`); stable-ts 2.19.1 (MIT),
+  faster-whisper 1.2.1 (MIT), openai-whisper (MIT), torchaudio 2.8.0 (BSD-2) in ai-venv. The model downloader is now resumable (HTTP
+  Range, 6 retries, hash continued across resumes): the first 1.6 GB download hit a CDN read timeout.
+- **Backend** (`backend/app/lyrics.py`, `POST /api/projects/{pid}/lyrics` job): picks the music clip (given, under the playhead, or
+  the first usable one; reversed / frozen / speed-ramped clips "can't be timed"); extracts its source range (16 kHz, 1 s margin); voice
+  activity per second (Silero VAD, "estimated on the full mix") + spans. **Auto**: faster-whisper with word timestamps + VAD, language
+  only if the user picks one; guard: words p < 0.35 dropped, segments dropped when no_speech > 0.7 / avg_logprob < -1.2 / compression
+  > 2.4, runs of the same word or 2-word phrase repeated 3+ times at even spacing (CV < 0.25) dropped; instrumental when voice < 3 % or
+  no words. **Paste** (`ai_worker/lyrics_align.py`, op `align_lyrics`, ai queue): stable-ts `align` on large-v3-turbo with the user's
+  lines (`original_split`), language detected first when not given (stable-ts needs one with faster-whisper), words clamped to 2.5x
+  the median length, then a word that starts where VAD hears no voice but ends in a voiced span starts with that span (over a music
+  bed the first word stretched back over the intro); unaligned / implausible words interpolated between neighbours and flagged.
+  Source -> timeline through clip start, in point and speed.
+- **UI** (`CaptionsDialog.tsx`, `lyrics/model.ts`): Source Speech | Song lyrics; song picker; Mode Auto / Paste lyrics / Tap to sync;
+  Accuracy small / Best (large-v3-turbo); Tap: Space = next line, Shift+Space = next word, Backspace = undo, optional snap to a beat
+  within 80 ms, untapped words spread evenly; "Snap words to beats" (`syncWordsToBeats`); styles as speech captions incl. reveal+pop;
+  safe-area placement; report (mode, words, lines, voice activity, low-confidence / flagged words); instrumental -> "No vocals in this
+  part of the song (instrumental)" with Paste / Tap buttons. Output: a "Lyrics" track in the caption `words` format (lines kept for
+  Paste / Tap, segment grouping for Auto).
+- **Tests**: `backend/tests/test_phase13a.py` (7: mapping + clips that can't be timed, repeat guard, interpolation, paste mode through
+  the real worker subprocess with the numpy test aligner, auto -> instrumental, VAD trim, and a real large-v3-turbo + stable-ts test
+  on a Windows-synthesized voice over a tone bed: >= 6/9 words in Auto, all 9 aligned in Paste, first word after the voice starts);
+  `frontend/src/lyrics/model.test.ts` (4); `frontend/e2e/lyrics.spec.ts` (Song lyrics -> Paste -> Lyrics track).
+- **Demo**: "Beat Sync Reel v6.1" (`d15f73526286`) was no longer in `projects\` (folder last changed 2026-10-15 22:10, not by this
+  phase's code or tests), so no copy was made. Its song (whole Video-78168.mp3, 0-23.455 s, as in the v6.1 export) analysed in memory:
+  voice activity 0 % in all 24 seconds, 0 words with large-v3-turbo and small (CUDA, 2.3 / 1.3 s); without VAD Whisper invents one
+  7-word segment at 17.8-23.3 s (20-40 ms words and one 5.4 s word, mean p 0.49) = hallucination. Instrumental: stopped there as the
+  user asked. `exports\lyrics demoeport.md` + `auto_mode_result.json` (no lyric text).
+
 ## The user's reel ("Beat Sync Reel", project in projects\)
 
 - 12 photos + `Video-78168.mp3` (119.6 BPM), 24 beat-synced cuts, markers Drop / Peak / Outro. The imported video is deliberately not used.
@@ -254,6 +293,8 @@ The detailed notes of Phases 1-12, moved out of PROGRESS.md (verbatim, in the or
 - Phase 11 (2026-10-14): the reel is photos only, so there is nothing to track; unchanged. The user didn't like the first Travel Dump edit: a new project **"Travel Dump v2"** was built from scratch (original unchanged, checksum): song from 27.21 s (drop at 6.85 s, second lift at 18.27 s), 13 sections, slam-into-slow-motion ramps on the drop / beat 19 / the second lift, "WILD" tracked onto a mountain ridge, the hand clip auto-reframed with "fuel money" riding it, "NO PLANS" behind the peak (SAM cutout), a pin on the car, the neon portrait with a beat-pulsing cyan outline + background-only grade + "LATE NIGHTS" behind him, 1-beat cuts with punch-ins on the peak, flashes + shake on the drops, a held wide ending with a fade to black; warm film grade; no sound effects. Checked: all cuts on beats (0.0 ms), 0 black / 0 frozen frames, audio 5 ms, pin 2-6 px and WILD 4-5 px from their subjects in the export, fuel money 23/36 px (the hand changes shape). Exports `Travel Dump v2.mp4` (Reels max) + `Travel Dump v2 Instagram.mp4`; breakdown, checks and comparison frames in `exports\travel dump v2 comparison\`.
 
 - Phase 12 (2026-10-15): the reel is photos only; unchanged (Auto-edit can use photos, but the reel is already hand-edited). Travel Dump v2: "fuel money" now rides the wrist cuff (drift 236 -> 27 px), both versions re-exported.
+
+- Phase 13a (2026-10-15): the "Beat Sync Reel v6.1" project was found missing from `projects\` (exports and the Golden Beat Trip template remain); its song is instrumental (0 % voice, no words), so no lyrics were added. Waiting for a song with vocals from a named folder.
 
 ## Fixed in the bug bash (Phase 8)
 

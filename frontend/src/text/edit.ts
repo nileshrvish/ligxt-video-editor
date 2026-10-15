@@ -117,6 +117,30 @@ export function addCaptions(p: Project, words: TimedWord[], style: Partial<TextS
   return { trackId, ids };
 }
 
+/** Song lyrics: one caption clip per line (timeline seconds) on a new "Lyrics" track, in the caption `words` format,
+ *  so every highlight style works. Lines from Auto mode are grouped with segmentWords first. Returns the clip ids. */
+export function addLyrics(p: Project, lines: TimedWord[][], style: Partial<TextSpec>, position: { x: number; y: number }): { trackId: string; ids: string[] } {
+  const trackId = addTrack(p, "text");
+  const track = p.tracks.find((t) => t.id === trackId)!;
+  track.name = "Lyrics";
+  const clean = lines.map((l) => l.map((w) => ({ ...w, text: w.text.trim() })).filter((w) => w.text)).filter((l) => l.length);
+  const ids: string[] = [];
+  clean.forEach((seg, i) => {
+    const start = seg[0].start;
+    const next = clean[i + 1]?.[0].start ?? Infinity;
+    const end = Math.max(start + 0.3, Math.min(seg[seg.length - 1].end + 0.25, next));
+    const spec: Partial<TextSpec> = {
+      ...deepClone(style), content: seg.map((w) => w.text).join(" "),
+      words: seg.map((w) => ({ text: w.text, start: +(w.start - start).toFixed(3), end: +(w.end - start).toFixed(3) })),
+      animIn: { type: "none", duration: 0.2, easing: "out" }, animOut: { type: "none", duration: 0.2, easing: "in" },
+    };
+    const c = newTextClip(+start.toFixed(3), +(end - start).toFixed(3), spec, position);
+    track.clips.push(c);
+    ids.push(c.id);
+  });
+  return { trackId, ids };
+}
+
 /** Rest-state spec (normalised) for UI reads. */
 export const specOf = (c: Clip): TextSpec => normalize(c.text);
 export const textDuration = (c: Clip) => clipDuration(c);

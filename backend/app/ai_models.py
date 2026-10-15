@@ -12,6 +12,7 @@ import json
 import shutil
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -89,8 +90,23 @@ CATALOG: dict[str, dict] = {
         "installs": [{"name": "flownet.pkl", "size": 24636301, "from": "RIFEv4.26_0921.zip", "member": "RIFEv4.26_0921/flownet.pkl",
                       "sha256": "45c7f74156704769dc9f85cfcaf8552e1e926f9399dcfa3a553dee88fac6f53f"}],
     },
+    "whisper-large-v3-turbo": {
+        "name": "Whisper large-v3-turbo (song lyrics)", "task": "speech", "license": "MIT",
+        "source": "https://huggingface.co/dropbox-dash/faster-whisper-large-v3-turbo", "res": 0, "dynamic": False,
+        "about": "OpenAI's Whisper large-v3-turbo (MIT) in CTranslate2 format: the most accurate option for lyrics (Auto) and for "
+                 "aligning pasted lyrics. Runs with faster-whisper on the graphics card.",
+        # the repo was renamed from mobiuslabsgmbh/faster-whisper-large-v3-turbo; same revision
+        "files": _hf("dropbox-dash/faster-whisper-large-v3-turbo", "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf", [
+            ("model.bin", 1617884929, "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da"),
+            ("config.json", 2263, "b0253ea6c0d3bea6b1e19e91a02acfd3b53f4467362efcb5a3e6b16c9b3a9b7e"),
+            ("preprocessor_config.json", 340, "7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711"),
+            ("tokenizer.json", 2710337, "297b13372ac43916285644fb9687add3cc62ee2a1adb60da3dc25cc94c1871fd"),
+            ("vocabulary.json", 1068114, "c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1"),
+        ]),
+    },
 }
 PERSON_MODELS = [k for k, v in CATALOG.items() if v["task"] == "person"]
+LYRICS_MODEL = "whisper-large-v3-turbo"
 RIFE_MODEL = "rife-4.26"
 OBJECT_MODEL = "sam2.1-small"
 DEFAULT_SETTINGS = {"device": "auto", "budgetGB": 4.5, "personModel": "birefnet"}  # best quality on the test clips
@@ -183,26 +199,48 @@ def download(mid: str, ctx: JobContext | None, p0: float = 0.0, p1: float = 1.0)
             done += f["size"]
             continue
         part = dest.with_name(dest.name + ".part")
-        req = urllib.request.Request(f["url"], headers={"User-Agent": "Ligxt-Video-Editor"})
         h = hashlib.sha256()
-        try:
-            with urllib.request.urlopen(req, timeout=60) as r, part.open("wb") as out:
-                while True:
-                    if ctx and ctx.cancelled():
-                        raise RuntimeError("Cancelled")
-                    chunk = r.read(1 << 20)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    h.update(chunk)
-                    done += len(chunk)
-                    if ctx:
-                        el = max(0.5, time.time() - t0)
-                        ctx.progress(p0 + (p1 - p0) * done / total,
-                                     f"Downloading {spec['name']}: {fmt_bytes(done)} of {fmt_bytes(total)} ({fmt_bytes(done / el)}/s)")
-        except BaseException:
-            part.unlink(missing_ok=True)
-            raise
+        part.unlink(missing_ok=True)
+        tries = 0
+        while True:
+            have = part.stat().st_size if part.exists() else 0
+            headers = {"User-Agent": "Ligxt-Video-Editor"}
+            if have:  # resume after a stall (CDNs can pause long enough to time out on big files)
+                headers["Range"] = f"bytes={have}-"
+            req = urllib.request.Request(f["url"], headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r, part.open("ab" if have else "wb") as out:
+                    if have and r.status != 206:  # the server ignored the range: start over
+                        out.seek(0)
+                        out.truncate()
+                        h = hashlib.sha256()
+                        done -= have
+                    while True:
+                        if ctx and ctx.cancelled():
+                            raise RuntimeError("Cancelled")
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        h.update(chunk)
+                        done += len(chunk)
+                        if ctx:
+                            el = max(0.5, time.time() - t0)
+                            ctx.progress(p0 + (p1 - p0) * done / total,
+                                         f"Downloading {spec['name']}: {fmt_bytes(done)} of {fmt_bytes(total)} ({fmt_bytes(done / el)}/s)")
+                if part.stat().st_size >= f["size"]:
+                    break
+                raise TimeoutError("the connection ended early")
+            except (TimeoutError, OSError, urllib.error.URLError) as e:
+                tries += 1
+                if tries > 6 or (ctx and ctx.cancelled()):
+                    part.unlink(missing_ok=True)
+                    raise RuntimeError(f"Downloading {f['name']} failed after {tries} tries ({e}). Nothing was installed; try again later.") from e
+                time.sleep(min(10, 2 * tries))
+                continue
+            except BaseException:
+                part.unlink(missing_ok=True)
+                raise
         if h.hexdigest() != f["sha256"]:
             part.unlink(missing_ok=True)
             raise RuntimeError(f"{f['name']} failed its checksum (the download was corrupted or the file changed upstream). "

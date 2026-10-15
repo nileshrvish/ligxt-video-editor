@@ -140,7 +140,12 @@ def op_track(ctx: Ctx, args: dict) -> dict:
     return track(ctx, args)
 
 
-OPS = {"probe": op_probe, "matte": op_matte, "segment": op_segment, "interp": op_interp, "track": op_track}
+def op_align_lyrics(ctx: Ctx, args: dict) -> dict:
+    from lyrics_align import align
+    return align(ctx, args)
+
+
+OPS = {"probe": op_probe, "matte": op_matte, "segment": op_segment, "interp": op_interp, "track": op_track, "align_lyrics": op_align_lyrics}
 
 
 def main() -> None:

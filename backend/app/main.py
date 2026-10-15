@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai_models, captions, config, cutout, luts, media, presets_api, projects, render, slowmo, system_api, templates_api, text_api, tracking, autoedit
+from . import ai_models, captions, config, cutout, luts, media, presets_api, projects, render, slowmo, system_api, templates_api, text_api, tracking, autoedit, lyrics
 from .ffmpeg_utils import ffmpeg_version, has_nvenc
 from .jobs import jobs
 
@@ -53,6 +53,7 @@ app.include_router(cutout.router)
 app.include_router(slowmo.router)
 app.include_router(tracking.router)
 app.include_router(autoedit.router)
+app.include_router(lyrics.router)
 
 
 @app.exception_handler(Exception)

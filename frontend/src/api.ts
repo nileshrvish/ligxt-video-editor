@@ -57,6 +57,8 @@ export const api = {
   textStyles: () => req<{ styles: { id: string; name: string; style: Record<string, unknown> }[] }>("GET", "/api/text-styles"),
   saveTextStyle: (name: string, style: Record<string, unknown>) => req<{ id: string; name: string }>("POST", "/api/text-styles", { name, style }),
   deleteTextStyle: (id: string) => req<{ ok: boolean }>("DELETE", `/api/text-styles/${id}`),
+  lyrics: (p: Project, body: { clipId: string | null; playhead: number; mode: "auto" | "align"; model: string; language: string | null; text?: string }) =>
+    req<{ jobId: string }>("POST", `/api/projects/${p.id}/lyrics`, { project: p, ...body }),
   captions: (p: Project, model: string, language: string | null) =>
     req<{ jobId: string }>("POST", `/api/projects/${p.id}/captions`, { project: p, model, language }),
   estimateSize: (p: Project) => req<{ jobId: string }>("POST", `/api/projects/${p.id}/export/estimate`, { project: p, mode: "final" }),

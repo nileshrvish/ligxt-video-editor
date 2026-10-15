@@ -72,7 +72,7 @@ if (-not (Test-Path $AiPy)) {
 if ($AiOk) {
     & $AiPy -m pip install --upgrade pip --timeout 60 --retries 10
     # PyTorch with CUDA 12.8 (about 3 GB the first time). Without an NVIDIA GPU it still runs, on the CPU.
-    & $AiPy -m pip install "torch==2.8.0" "torchvision==0.23.0" --index-url https://download.pytorch.org/whl/cu128 --timeout 120 --retries 10
+    & $AiPy -m pip install "torch==2.8.0" "torchvision==0.23.0" "torchaudio==2.8.0" --index-url https://download.pytorch.org/whl/cu128 --timeout 120 --retries 10
     if ($LASTEXITCODE -ne 0) { $AiOk = $false; Write-Host "Installing PyTorch failed (check your internet connection and re-run setup)." -ForegroundColor Yellow }
 }
 if ($AiOk) {
