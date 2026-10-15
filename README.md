@@ -222,6 +222,8 @@ cd frontend; npm run dev
 
 The UI tests use Playwright's headless Chromium (installed with `npx playwright install chromium`); the preview-vs-export test plays H.264 video, which Playwright's Chromium can't decode, so it runs in the system's Microsoft Edge (headless, its own temporary profile).
 
+Project status, rules and known issues: `PROGRESS.md`; how every phase was built and measured: `docs\HISTORY.md`.
+
 The project format is documented in `backend\app\models.py`. The ffmpeg graph builder is in `backend\app\render.py`. `POST /api/projects/<id>/export/preview-graph` returns the generated ffmpeg command without rendering it, which helps with debugging.
 
 ## Bundled LUTs and licenses
